@@ -11,6 +11,11 @@
 #include <glm/vec3.hpp>
 using namespace glm;
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif
+
 using buffer = std::vector<char>;
 buffer read_file(const std::string& _path)
 {
@@ -139,6 +144,56 @@ void setTranslationForMatrix(glm::mat4& mat, const glm::vec3& v)
 	mat[3][1] = v.y;
 	mat[3][2] = v.z;
 	mat[3][3] = 1.f;
+}
+
+void createMatrix(DObjAnimMat_s& mat, float *matrix)
+{
+	float x = mat.transWeight * mat.quat.x;
+	float y = mat.transWeight * mat.quat.y;
+	float z = mat.transWeight * mat.quat.z;
+	float xx = x * mat.quat.x;
+	float y2 = x * mat.quat.y;
+	float xy = x * y2;
+	float z2 = mat.quat.z;
+	float xz = x * z2;
+	float w2 = mat.quat.w;
+	float xw = x * w2;
+	float yy = y2 * y;
+	float yz = y * z2;
+	float yw = y * w2;
+	float zz = z2 * z;
+	float zw = z * w2;
+
+	matrix[0] = 1.f - (yy + zz);
+	matrix[1] = zw + xy;
+	matrix[2] = xz - yw;
+	matrix[3] = 0.f;
+
+	matrix[4] = xy - zw;
+	matrix[5] = 1.f - (zz + xx);
+	matrix[6] = xw + yz;
+	matrix[7] = 0.f;
+
+	matrix[8] = xz + yw;
+	matrix[9] = yz - xw;
+	matrix[10] = 1.f - (xx + yy);
+	matrix[11] = 0.f;
+
+	matrix[12] = mat.trans.x;
+	matrix[13] = mat.trans.y;
+	matrix[14] = mat.trans.z;
+	matrix[15] = 1.f;
+}
+
+vec3 transformTranslationVector(DObjAnimMat_s& mat, const vec3& in)
+{
+	vec3 out;
+	float m[16];
+	createMatrix(mat, m);
+	out.x = (in.x * m[0]) + (in.y * m[4]) + (in.z * m[8]) + m[12];
+	out.y = (in.x * m[1]) + (in.y * m[5]) + (in.z * m[9]) + m[13];
+	out.z = (in.x * m[2]) + (in.y * m[6]) + (in.z * m[10]) + m[14];
+	return out;
 }
 
 void MatrixTransformVectorByMatrix()
@@ -463,6 +518,16 @@ struct vertex
 	vec3 normal;
 	vec2 uv;
 	vec3 tangent, binormal;
+
+	vertex()
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			boneindices[i] = -1;
+			boneweights[i] = 0.0f;
+		}
+		numweights = 0;
+	}
 };
 
 //TODO: proper mesh organizing
@@ -581,9 +646,7 @@ struct xmodel
 #pragma pack(push, 1)
 struct XBlendInfo
 {
-	u8 boneindex;
-	u8 idk;
-	//u16 boneoffset;
+	u16 boneindex;
 	vec3 offset;
 	u16 boneweight;
 };
@@ -633,8 +696,7 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 			vec3 tangent = rd.read<vec3>();
 
 			u8 numweights;
-			//i16 vboneoffset;
-			u8 boneindex;
+			u16 boneindex;
 			vec3 offset;
 			u8 boneweight;
 
@@ -660,24 +722,21 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 			else
 			{
 				numweights = rd.read<u8>();
-				//vboneoffset = rd.read<i16>();
-				boneindex = rd.read<u8>();
-				u8 idk = rd.read<u8>(); //ignoring for now idk, combined boneoffset
-				if (idk != 0) perror("expected zero");
+				boneindex = rd.read<u16>();
 
 				offset = rd.read<vec3>();
 
-				//DObjAnimMat_s mat = xm.xmp.matrices[boneindex];
-				//mat.transWeight = 2.f;
-				//MatrixTransformVectorQuatTrans(offset, mat, vtx.pos);
+				mat4 mat = getWorldMatrix2(xm.xmp.bones, xm.xmp.matrices, boneindex);
+				vtx.pos = glm::vec3(mat * glm::vec4(offset,1.f));
+				//MatrixTransformVectorQuatTrans(offset, xm.xmp.matrices[xm.xmp.bones[boneindex].parent], vtx.pos);
 				vtx.numweights = numweights + 1;
-				vtx.pos = offset;
+				vtx.boneweights[0] = 1.f;
+				vtx.boneindices[0] = boneindex;
 
 				if (numweights > 0)
 				{
 					boneweight = rd.read<u8>();
 					vtx.boneweights[0] = ((float)boneweight) / 256.f;
-					vtx.boneindices[0] = boneindex;
 #if 0
 					printf("n=%f,%f,%f,uv=%f,%f,numweights=%d,offset=%f,%f,%f,boneoffset=%d,boneweight=%d\n",
 						n.x, n.y, n.z, u, v, numweights, offset.x, offset.y, offset.z, boneoffset, boneweight & 0xff
@@ -687,10 +746,8 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 					for (int k = 0; k < numweights; ++k)
 					{
 						blendinfo[k + 1] = rd.read<XBlendInfo>();
-						vtx.boneweights[k + 1] = ((float)blendinfo[k + 1].boneweight) / 256.f;
+						vtx.boneweights[k + 1] = ((float)blendinfo[k + 1].boneweight) / (float)USHRT_MAX;
 						vtx.boneindices[k + 1] = blendinfo[k + 1].boneindex;
-						if (blendinfo[k + 1].idk != 0)
-							perror("not zero");
 						//printf("\t%d: offset: %f,%f,%f boneoffset: %d, boneweight: %d\n", k, blendinfo[k].offset.x, blendinfo[k].offset.y, blendinfo[k].offset.z, blendinfo[k].boneoffset, blendinfo[k].boneweight);
 					}
 				}
@@ -824,31 +881,35 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 
 	xmp.matrices[0].quat.w = 1.f;
 	xmp.matrices[0].transWeight = 2.f;
-	auto* matPtr = &xmp.matrices[1];
+	//auto* matPtr = &xmp.matrices[1];
 	for (int i = 0; i < xmp.numbonesrelative; ++i)
 	{
-		auto* parentBoneMat = &matPtr[-parentList[i]];
+		//auto* parentBoneMat = &matPtr[-parentList[i]];
 		quat tmp;
 		tmp.x = (float)quats[i].x / (float)SHRT_MAX;
 		tmp.y = (float)quats[i].y / (float)SHRT_MAX;
 		tmp.z = (float)quats[i].z / (float)SHRT_MAX;
 		tmp.w = (float)quats[i].w / (float)SHRT_MAX;
-
-		quat q = QuatMultiply(tmp, parentBoneMat->quat);
+		quat q = xmp.matrices[xmp.bones[i + 1].parent].quat * tmp;// QuatMultiply(tmp, parentBoneMat->quat);
 		float t = glm::dot(q, q);
 		if (fabs(t) < 0.01f)
 		{
-			matPtr->quat.w = 1.f;
-			matPtr->transWeight = 2.f;
+			q.w = 1.f;
+			xmp.matrices[i + 1].transWeight = 2.f;
+			//matPtr->quat.w = 1.f;
+			//matPtr->transWeight = 2.f;
 		}
 		else
 		{
-			matPtr->transWeight = 2.f / t;
+			xmp.matrices[i + 1].transWeight = 2.f / t;
 		}
-		matPtr->quat = q;
-		MatrixTransformVectorQuatTrans(trans[i], *parentBoneMat, matPtr->trans);
-		printf("%d trans=%f,%f,%f\n", i+1, matPtr->trans.x, matPtr->trans.y, matPtr->trans.z);
-		++matPtr;
+		xmp.matrices[i + 1].quat = q;
+		//matPtr->quat = q;
+		MatrixTransformVectorQuatTrans(trans[i], xmp.matrices[xmp.bones[i + 1].parent], xmp.matrices[i+1].trans);
+		//mat4 parentmatrix = glm::toMat4(xmp.matrices[xmp.bones[i + 1].parent].quat);
+		//xmp.matrices[i + 1].trans = glm::vec3( glm::vec4(trans[i], 1.0f) * parentmatrix );
+		//printf("%d trans=%f,%f,%f\n", i+1, matPtr->trans.x, matPtr->trans.y, matPtr->trans.z);
+		//++matPtr;
 	}
 #if 0
 	for (int i = 1; i < numbonestotal; ++i)
@@ -875,6 +936,44 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 	return true;
 }
 
+void test_xmodel()
+{
+#ifdef _WIN32
+	const char* exepath = "C:\\Users\\PC\\source\\repos\\xmodel_viewer\\Release\\xmodel_viewer.exe";
+	STARTUPINFOA si;
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	ZeroMemory(&pi, sizeof(pi));
+	const char* modelpath = "C:\\Users\\PC\\source\\repos\\xmodel_test\\test.xmodel_export";
+	char commandline[4096];
+	sprintf_s(commandline, "%s \"%s\"", exepath, modelpath);
+
+	if (!CreateProcessA(NULL,   // No module name (use command line)
+		commandline,        // Command line
+		NULL,           // Process handle not inheritable
+		NULL,           // Thread handle not inheritable
+		FALSE,          // Set handle inheritance to FALSE
+		0,              // No creation flags
+		NULL,           // Use parent's environment block
+		NULL,           // Use parent's starting directory 
+		&si,            // Pointer to STARTUPINFO structure
+		&pi)           // Pointer to PROCESS_INFORMATION structure
+		)
+	{
+		printf("CreateProcess failed (%d).\n", GetLastError());
+		return;
+	}
+
+	// Wait until child process exits.
+	WaitForSingleObject(pi.hProcess, INFINITE);
+
+	// Close process and thread handles. 
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+#endif
+}
+
 int main()
 {
 	std::string basepath = "F:/iwd/";
@@ -882,7 +981,8 @@ int main()
 	//read_xanim();
 	//return 0;
 
-	buffer v = read_file(basepath + "xmodel/character_russian_diana_medic");
+	//buffer v = read_file(basepath + "xmodel/character_russian_diana_medic");
+	buffer v = read_file(basepath + "xmodel/playerbody_russian_coat01");
 	//buffer v = read_file("F:/iwd/xmodel/prop_barrel_green");
 	//buffer v = read_file("F:\\SteamLibrary\\steamapps\\common\\Call of Duty 2\\main\\xmodel\\lolcow");
 	if (v.empty())
@@ -920,6 +1020,7 @@ int main()
 		read_xmodelparts(basepath + "xmodelparts/" + lodstrings[0], xm);
 		read_xmodelsurface(basepath + "xmodelsurfs/" + lodstrings[0], xm);
 		xm.write();
+		test_xmodel();
 		return 0;
 	}
 	collisionLod_t collisionlod = (collisionLod_t)rd.read<i32>();
