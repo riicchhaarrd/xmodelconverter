@@ -4,6 +4,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <map>
+#include <unordered_map>
 
 #include <glm/glm.hpp>
 #include <glm/gtx/quaternion.hpp>
@@ -15,6 +17,13 @@ using namespace glm;
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #endif
+
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
 
 using buffer = std::vector<char>;
 buffer read_file(const std::string& _path)
@@ -31,12 +40,20 @@ buffer read_file(const std::string& _path)
 	return v;
 }
 
-using u8 = uint8_t;
-using u16 = uint16_t;
-using u32 = uint32_t;
-using i8 = int8_t;
-using i16 = int16_t;
-using i32 = int32_t;
+struct xbone
+{
+	std::string name;
+	int parent;
+	quat q;
+	vec3 offset;
+	mat4 localMatrix;
+
+	xbone() : parent(-1)
+	{
+		q.w = 1.f;
+		localMatrix = glm::toMat4(q);
+	}
+};
 
 struct reader
 {
@@ -47,6 +64,24 @@ struct reader
 		m_buf(_buf),
 		m_pos(0)
 	{
+	}
+
+	bool read_null_terminated_string(std::string& s)
+	{
+		s.clear();
+		u8 c;
+		while ((c = read<u8>()))
+			s.push_back(c);
+		return !s.empty();
+	}
+
+	template<typename T>
+	std::vector<T> read_typed_buffer_to_vector(size_t N)
+	{
+		std::vector<T> v;
+		for (size_t i = 0; i < N; ++i)
+			v.push_back(read<T>());
+		return v;
 	}
 
 	template<typename T>
@@ -77,19 +112,6 @@ struct XModelCollSurf_s
 };
 #pragma pack(pop)
 
-typedef enum
-{
-	SF_BAD,
-	SF_POLY,
-	SF_ENTITY,
-	SF_XMODEL_SKINNED,
-	SF_XMODEL_RIGID,
-	SF_STATICMODEL_CACHED,
-	SF_TRIANGLES,
-	SF_RAW_GEOMETRY,
-	SF_NUM_SURFACE_TYPES
-} surfaceType_t;
-
 static void print_bytes(u8* buf, size_t n)
 {
 	for (int i = 0; i < n; ++i)
@@ -116,18 +138,161 @@ struct DObjAnimMat_s
 	float transWeight = 0.0f;
 };
 
-struct xbone
+struct xmodelparts
 {
-	std::string name;
-	int parent;
-	quat q;
-	vec3 offset;
-	mat4 localMatrix;
+	std::vector<DObjAnimMat_s> matrices;
+	std::vector<xbone> bones;
+	std::unordered_map<std::string, int> bonemap;
+	u16 numbonestotal;
+	u16 numbonesrelative;
+	u16 numbonesabsolute;
 
-	xbone() : parent(-1)
+	int find_bone_index_by_name(const std::string& name)
 	{
-		q.w = 1.f;
-		localMatrix = glm::toMat4(q);
+		for (int i = 0; i < bones.size(); ++i)
+		{
+			if (bones[i].name == name)
+				return i;
+		}
+		return -1;
+	}
+};
+
+struct vertex
+{
+	int boneindices[4];
+	float boneweights[4];
+	int numweights;
+	vec3 pos;
+	vec3 normal;
+	vec2 uv;
+	vec3 tangent, binormal;
+
+	vertex()
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			boneindices[i] = -1;
+			boneweights[i] = 0.0f;
+		}
+		numweights = 0;
+	}
+};
+
+//TODO: proper mesh organizing
+struct mesh
+{
+};
+
+struct xmodelsurface
+{
+	std::vector<unsigned int> indices;
+	std::vector<vertex> vertices;
+	std::vector<mesh> meshes;
+};
+
+struct xmodel
+{
+	std::string path;
+	xmodelparts xmp;
+	xmodelsurface xms;
+	std::vector<std::string> lods;
+
+	bool write()
+	{
+		FILE* fp = NULL;
+		//fp = stdout;
+		fopen_s(&fp, "test.xmodel_export", "w");
+		if (!fp)
+			return false;
+		fprintf(fp, "//Export filename blablabla\n");
+		fprintf(fp, "MODEL\n");
+		fprintf(fp, "VERSION 6\n");
+		fprintf(fp, "\n");
+		fprintf(fp, "NUMBONES %d\n", xmp.numbonestotal);
+
+		int boneindex = 0;
+		for (auto& b : xmp.bones)
+		{
+			fprintf(fp, "BONE %d %d \"%s\"\n", boneindex++, b.parent, b.name.c_str());
+		}
+		fprintf(fp, "\n");
+		boneindex = 0;
+		for (auto& b : xmp.bones)
+		{
+			glm::vec3 rx;
+			glm::vec3 ry;
+			glm::vec3 rz;
+			mat4 getWorldMatrix2(std::vector<xbone>&bones, std::vector<DObjAnimMat_s>&matrices, int index);
+			mat4 worldMatrix = getWorldMatrix2(xmp.bones, xmp.matrices, boneindex);
+			auto& mat = worldMatrix;
+			void getXYZFromMatrix(const glm::mat4 & mat, glm::vec3 & rx, glm::vec3 & ry, glm::vec3 & rz);
+			getXYZFromMatrix(mat, rx, ry, rz);
+			glm::vec3 offset;
+			void getTranslationFromMatrix(const glm::mat4 & mat, glm::vec3 & v);
+			getTranslationFromMatrix(mat, offset);
+			fprintf(fp, "BONE %d\n", boneindex);
+			//printf("BONE %d //bone name: %s, parent bone name: %s\n", boneindex, b.name.c_str(), b.parent==-1?"no parent":bones[b.parent].name.c_str());
+			//printf("OFFSET %f, %f, %f\n", b.offset.x, b.offset.y, b.offset.z);
+			fprintf(fp, "OFFSET %f, %f, %f\n", offset.x, offset.y, offset.z);
+			fprintf(fp, "SCALE 1.000000, 1.000000, 1.000000\n");
+			//printf("QUAT %f, %f, %f, %f //len=%f\n", b.q.x, b.q.y, b.q.z, b.q.w, glm::length(b.q));
+			fprintf(fp, "X %f, %f, %f\n", rx.x, rx.y, rx.z);
+			fprintf(fp, "Y %f, %f, %f\n", ry.x, ry.y, ry.z);
+			fprintf(fp, "Z %f, %f, %f\n", rz.x, rz.y, rz.z);
+			fprintf(fp, "\n");
+			++boneindex;
+		}
+
+		fprintf(fp, "NUMVERTS %d\n", xms.vertices.size());
+		int nv = 0;
+		for (auto& v : xms.vertices)
+		{
+			fprintf(fp, "VERT %d\n", nv++);
+			fprintf(fp, "OFFSET %f, %f, %f\n", v.pos.x, v.pos.y, v.pos.z);
+			fprintf(fp, "BONES %d\n", v.numweights);
+			for (int k = 0; k < v.numweights; ++k)
+			{
+				fprintf(fp, "BONE %d %f\n", v.boneindices[k], v.boneweights[k]);
+			}
+			fprintf(fp, "\n");
+		}
+		fprintf(fp, "NUMFACES %d\n", xms.indices.size() / 3);
+		for (int i = 0; i < xms.indices.size(); i += 3)
+		{
+			fprintf(fp, "TRI 0 0 0 0\n");
+			auto& v1 = xms.vertices[xms.indices[i]];
+			auto& v2 = xms.vertices[xms.indices[i + 1]];
+			auto& v3 = xms.vertices[xms.indices[i + 2]];
+			for (int k = 0; k < 3; ++k)
+			{
+				auto& kv = xms.vertices[xms.indices[i + k]];
+				fprintf(fp, "VERT %d\n", xms.indices[i + k]);
+				fprintf(fp, "NORMAL %f %f %f\n", kv.normal.x, kv.normal.y, kv.normal.z);
+				fprintf(fp, "COLOR 1.000000 1.000000 1.000000 1.000000\n");
+				fprintf(fp, "UV 1 %f %f\n", kv.uv.x, kv.uv.y);
+			}
+			fprintf(fp, "\n");
+		}
+		fprintf(fp, "NUMOBJECTS 1\n");
+		fprintf(fp, "OBJECT 0 \"test\"\n");
+		fprintf(fp, "\n");
+		fprintf(fp, "NUMMATERIALS 1\n");
+		fprintf(fp, "MATERIAL 0 \"aa_default\" \"Lambert\" \"test.jpg\"\n");
+		fprintf(fp, "COLOR 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "TRANSPARENCY 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "AMBIENTCOLOR 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "INCANDESCENCE 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "COEFFS 0.800000 0.000000\n");
+		fprintf(fp, "GLOW 0.000000 0\n");
+		fprintf(fp, "REFRACTIVE 6 1.000000\n");
+		fprintf(fp, "SPECULARCOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
+		fprintf(fp, "REFLECTIVECOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
+		fprintf(fp, "REFLECTIVE -1 -1.000000\n");
+		fprintf(fp, "BLINN -1.000000 -1.000000\n");
+		fprintf(fp, "PHONG -1.000000\n");
+		//if(fp != stdout)
+		fclose(fp);
 	}
 };
 
@@ -267,6 +432,17 @@ mat4 getWorldMatrix2(std::vector<xbone>& bones, std::vector<DObjAnimMat_s>& matr
 	return getWorldMatrix2(bones, matrices, bone.parent) * local;
 }
 
+mat4 getWorldMatrix3(std::vector<xbone>& bones, std::vector<DObjAnimMat_s>& matrices, int index)
+{
+	auto& bone = bones[index];
+	mat4 local = getMatrixForDObjMatrix(matrices[index]);
+	if (bone.parent == -1)
+	{
+		return local;
+	}
+	return getWorldMatrix3(bones, matrices, bone.parent) * local;
+}
+
 glm::mat4 getMatrixFromXYZ(const glm::vec3& _x, const glm::vec3& _y, const glm::vec3& _z)
 {
 	glm::mat4 _mat(0.f);
@@ -331,31 +507,230 @@ void print_quat(const quat& q)
 
 #define FIXME() do{printf("FIXME %s:%d\n", __FILE__, __LINE__);exit(-1);}while(0)
 
+struct xanimpart
+{
+	std::map<int, vec3> trans;
+	std::map<int, quat> rot;
+};
 
-bool read_xanim()
+struct xanim
+{
+	u16 version;
+	u16 numframes, numbones;
+	u8 flags;
+	u16 framerate;
+
+	float frequency;
+
+	std::vector<std::string> partnames;
+	std::unordered_map<std::string, xanimpart> parts;
+
+	void write(xmodel *ref)
+	{
+		FILE* fp = NULL;
+		fopen_s(&fp, "test_anim.xanim_export", "w");
+
+		if (!fp)
+			return;
+		fprintf(fp, "ANIMATION\n");
+		fprintf(fp, "VERSION 3\n");
+		fprintf(fp, "\n");
+		fprintf(fp, "NUMPARTS %d\n", partnames.size());
+		int partindex = 0;
+		for (auto& it : partnames)
+		{
+			fprintf(fp, "PART %d \"%s\"\n", partindex++, it.c_str());
+		}
+		fprintf(fp, "\n");
+		fprintf(fp, "FRAMERATE %d\n", framerate);
+		fprintf(fp, "NUMFRAMES %d\n", numframes);
+		fprintf(fp, "\n");
+		for (int i = 0; i < numframes; ++i)
+		{
+			fprintf(fp, "FRAME %d\n", i);
+			partindex = 0;
+			for (auto& it : partnames)
+			{
+				auto& part = parts[it];
+				auto& rot = part.rot[i];
+				auto& trans = part.trans[i];
+				fprintf(fp, "PART %d\n", partindex);
+				fprintf(fp, "OFFSET %f, %f, %f\n", trans.x, trans.y, trans.z);
+				fprintf(fp, "SCALE 1.000000, 1.000000, 1.000000\n");
+				glm::mat4 m = glm::toMat4(rot);
+
+				glm::mat4 wm = getWorldMatrix3(ref->xmp.bones, ref->xmp.matrices, partindex);
+
+				m = m * wm;
+
+				glm::vec3 x, y, z;
+				getXYZFromMatrix(m, x, y, z);
+				fprintf(fp, "X %f, %f, %f\n", x.x, x.y, x.z);
+				fprintf(fp, "Y %f, %f, %f\n", y.x, y.y, y.z);
+				fprintf(fp, "Z %f, %f, %f\n", z.x, z.y, z.z);
+				fprintf(fp, "\n");
+
+				++partindex;
+			}
+		}
+		fprintf(fp, "NOTETRACKS\n");
+		for (int i = 0; i < partnames.size(); ++i)
+		{
+			fprintf(fp, "PART %d\n", i);
+			fprintf(fp, "NUMTRACKS 0\n");
+			fprintf(fp, "\n");
+		}
+		fclose(fp);
+	}
+};
+
+void read_xanim_rotations(xanim& xa, reader& rd, const std::string& tag, bool flipquat, bool simplequat)
+{
+	u16 numrot = rd.read<u16>();
+	//printf("numrot=%d\n", numrot);
+	if (numrot == 0)
+		return;
+
+	std::vector<int> frames;
+
+	if (numrot == 1 || numrot == xa.numframes)
+	{
+		for (int i = 0; i < numrot; ++i)
+			frames.push_back(i);
+	}
+	else if(xa.numframes > 0xff)
+	{
+		for (int i = 0; i < numrot; ++i)
+			frames.push_back(rd.read<u16>());
+	}
+	else
+	{
+		for (int i = 0; i < numrot; ++i)
+			frames.push_back(rd.read<u8>());
+	}
+
+	float x, y, z, w;
+	for (int i = 0; i < numrot; ++i)
+	{
+		if (simplequat)
+		{
+			x = y = z = w = 0.f;
+			z = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
+			w = 1.f - x * x - y * y - z * z;
+
+			if (fabs(w) >= 0.01f)
+				w = sqrtf(w);
+			//printf("simplequat frame %d -> %f,%f,%f,%f\n", frames[i], x, y, z, w);
+			xa.parts[tag].rot.insert(std::make_pair(frames[i], glm::quat(x,y,z,w)));
+		} else {
+
+			x = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
+			y = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
+			z = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
+			w = 1.f - x * x - y * y - z * z;
+
+			if (fabs(w) >= 0.01f)
+				w = sqrtf(w);
+
+			//printf("else frame %d -> %f,%f,%f,%f\n", frames[i], x, y, z, w);
+			xa.parts[tag].rot.insert(std::make_pair(frames[i], glm::quat(x, y, z, w)));
+		}
+	}
+}
+
+void read_xanim_translations(xanim &xa, reader& rd, const std::string& tag)
+{
+	u16 numtrans = rd.read<u16>();
+	if (numtrans == 0)
+		return;
+	if (numtrans == 1)
+	{
+		vec3 trans = rd.read<vec3>();
+		//printf("numtrans 1 %f,%f,%f\n", trans.x, trans.y, trans.z);
+		return;
+	}
+
+	std::vector<int> frames;
+
+	if (numtrans == 1 || numtrans == xa.numframes)
+	{
+		for (int i = 0; i < numtrans; ++i)
+			frames.push_back(i);
+	}
+	else if (xa.numframes > 0xff)
+	{
+		for (int i = 0; i < numtrans; ++i)
+			frames.push_back(rd.read<u16>());
+	}
+	else
+	{
+		for (int i = 0; i < numtrans; ++i)
+			frames.push_back(rd.read<u8>());
+	}
+
+	for (int i = 0; i < numtrans; ++i)
+	{
+		vec3 v = rd.read<vec3>();
+		//printf("trans frame %d -> %f,%f,%f\n", frames[i], v.x, v.y, v.z);
+		xa.parts[tag].trans.insert(std::make_pair(frames[i], v));
+	}
+}
+
+bool read_xanim(const std::string& basepath, const std::string& filename, xanim& xa, xmodel *ref = nullptr)
 {
 	//buffer v = read_file("F:\\SteamLibrary\\steamapps\\common\\Call of Duty 2\\main\\xanim\\lolcow_anim");
-	buffer v = read_file("F:\\iwd\\xanim\\viewmodel_bar_fire");
+	buffer v = read_file(basepath + filename);
 	if (v.empty())
 		return false;
 
 	reader rd(v);
-	u16 version = rd.read<u16>();
-	u16 numframes = rd.read<u16>();
-	u16 numbones = rd.read<u16>();
-	u8 flags = rd.read<u8>();
-	u16 framerate = rd.read<u16>();
+	xa.version = rd.read<u16>();
+	xa.numframes = rd.read<u16>();
+	xa.numbones = rd.read<u16>();
+	xa.flags = rd.read<u8>();
+	xa.framerate = rd.read<u16>();
 
-	printf("version=%d\n", version);
-	printf("numframes=%d\n", numframes);
-	printf("numbones=%d\n", numbones);
-	printf("flags=%02X\n", flags & 0xff);
-	bool looping = (flags & 0x1) == 0x1;
-	bool delta = (flags & 0x2) == 0x2;
-	printf("looping=%d,delta=%d\n", looping, delta);
-	printf("framerate=%d\n", framerate);
-	float frequency = ((float)framerate) / ((float)numframes);
-	printf("frequency = %f\n", frequency);
+	//printf("version=%d\n", xa.version);
+	//printf("numframes=%d\n", xa.numframes);
+	//printf("numbones=%d\n", xa.numbones);
+	//printf("flags=%02X\n", xa.flags & 0xff);
+	bool looping = (xa.flags & 0x1) == 0x1;
+
+	bool delta = (xa.flags & 0x2) == 0x2;
+	//printf("looping=%d,delta=%d\n", looping, delta);
+	//printf("framerate=%d\n", xa.framerate);
+	xa.frequency = ((float)xa.framerate) / ((float)xa.numframes);
+	//printf("frequency = %f\n", xa.frequency);
+	if (delta)
+	{
+		read_xanim_rotations(xa, rd, "tag_origin", false, true);
+		read_xanim_translations(xa, rd, "tag_origin");
+	}
+	if (looping)
+		++xa.numframes;
+
+	int boneflagssize = ((xa.numbones - 1) >> 3) + 1;
+	std::vector<u8> flipflags = rd.read_typed_buffer_to_vector<u8>(boneflagssize);
+	std::vector<u8> simpleflags = rd.read_typed_buffer_to_vector<u8>(boneflagssize);
+	for (int i = 0; i < xa.numbones; ++i)
+	{
+		std::string bonename;
+		if (!rd.read_null_terminated_string(bonename))
+			break;
+		xa.partnames.push_back(bonename);
+		//printf("bonename: %s\n", bonename.c_str());
+	}
+	for (int i = 0; i < xa.numbones; ++i)
+	{
+		bool flipquat = ((1 << (i & 7)) & flipflags[i >> 3]) != 0;
+		bool simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
+
+		read_xanim_rotations(xa, rd, xa.partnames[i], flipquat, simplequat);
+		read_xanim_translations(xa, rd, xa.partnames[i]);
+	}
+	return true;
+
+#if 0
 	if (delta)
 	{
 		//TODO: FIX delta for AI anims broken atm
@@ -368,11 +743,11 @@ bool read_xanim()
 		}
 		else
 		{
-			if (type >= numframes)
+			if (type >= xa.numframes)
 			{
 				FIXME();
 			}
-			else if (numframes <= 256)
+			else if (xa.numframes <= 256)
 			{
 				//FIXME();
 				printf("type=%d\n", type);
@@ -389,7 +764,7 @@ bool read_xanim()
 		}
 	}
 
-	int numquatbytes = ((numbones - 1) >> 3) + 1;
+	int numquatbytes = ((xa.numbones - 1) >> 3) + 1;
 
 	std::vector<int> unknownbits;
 	std::vector<int> simplequatbits;
@@ -407,7 +782,7 @@ bool read_xanim()
 	}
 	printf("%d/%d\n", rd.m_pos, rd.m_buf.size());
 
-	for (int j = 0; j < numbones; ++j)
+	for (int j = 0; j < xa.numbones; ++j)
 	{
 		std::string bone;
 		u8 c;
@@ -418,7 +793,7 @@ bool read_xanim()
 		printf("bone %d: %s\n", j, bone.c_str());
 	}
 
-	for (int i = 0; i < numbones; ++i)
+	for (int i = 0; i < xa.numbones; ++i)
 	{
 		int a = (unknownbits[i >> 3] >> (i & 7)) & 1;
 		int b = (simplequatbits[i >> 3] >> (i & 7)) & 1;
@@ -438,7 +813,7 @@ bool read_xanim()
 			else
 			{
 				assert(numframes > value_b);
-				if (numframes <= 256)
+				if (xa.numframes <= 256)
 				{
 					printf("LOWER\n");
 					for (int k = 0; k < value_b / 2; ++k)
@@ -466,6 +841,7 @@ bool read_xanim()
 			break;
 		}
 	}
+#endif
 
 #if 0
 	//at end of file
@@ -489,159 +865,6 @@ quat QuatMultiply(quat& a, quat& b)
 	c.w = (((a.w * b.w) - (a.x * b.x)) - (a.y * b.y)) - (a.z * b.z);
 	return c;
 }
-
-struct xmodelparts
-{
-	std::vector<DObjAnimMat_s> matrices;
-	std::vector<xbone> bones;
-	u16 numbonestotal;
-	u16 numbonesrelative;
-	u16 numbonesabsolute;
-
-	int find_bone_index_by_name(const std::string& name)
-	{
-		for (int i = 0; i < bones.size(); ++i)
-		{
-			if (bones[i].name == name)
-				return i;
-		}
-		return -1;
-	}
-};
-
-struct vertex
-{
-	int boneindices[4];
-	float boneweights[4];
-	int numweights;
-	vec3 pos;
-	vec3 normal;
-	vec2 uv;
-	vec3 tangent, binormal;
-
-	vertex()
-	{
-		for (int i = 0; i < 4; ++i)
-		{
-			boneindices[i] = -1;
-			boneweights[i] = 0.0f;
-		}
-		numweights = 0;
-	}
-};
-
-//TODO: proper mesh organizing
-struct mesh
-{
-};
-
-struct xmodelsurface
-{
-	std::vector<unsigned int> indices;
-	std::vector<vertex> vertices;
-	std::vector<mesh> meshes;
-};
-
-struct xmodel
-{
-	xmodelparts xmp;
-	xmodelsurface xms;
-
-	bool write()
-	{
-		FILE* fp = NULL;
-		//fp = stdout;
-		fopen_s(&fp, "test.xmodel_export", "w");
-		if (!fp)
-			return false;
-		fprintf(fp, "//Export filename blablabla\n");
-		fprintf(fp, "MODEL\n");
-		fprintf(fp, "VERSION 6\n");
-		fprintf(fp, "\n");
-		fprintf(fp, "NUMBONES %d\n", xmp.numbonestotal);
-
-		int boneindex = 0;
-		for (auto& b : xmp.bones)
-		{
-			fprintf(fp, "BONE %d %d \"%s\"\n", boneindex++, b.parent, b.name.c_str());
-		}
-		fprintf(fp, "\n");
-		boneindex = 0;
-		for (auto& b : xmp.bones)
-		{
-			glm::vec3 rx;
-			glm::vec3 ry;
-			glm::vec3 rz;
-			mat4 worldMatrix = getWorldMatrix2(xmp.bones, xmp.matrices, boneindex);
-			auto& mat = worldMatrix;
-
-			getXYZFromMatrix(mat, rx, ry, rz);
-			glm::vec3 offset;
-			getTranslationFromMatrix(mat, offset);
-			fprintf(fp, "BONE %d\n", boneindex);
-			//printf("BONE %d //bone name: %s, parent bone name: %s\n", boneindex, b.name.c_str(), b.parent==-1?"no parent":bones[b.parent].name.c_str());
-			//printf("OFFSET %f, %f, %f\n", b.offset.x, b.offset.y, b.offset.z);
-			fprintf(fp, "OFFSET %f, %f, %f\n", offset.x, offset.y, offset.z);
-			fprintf(fp, "SCALE 1.000000, 1.000000, 1.000000\n");
-			//printf("QUAT %f, %f, %f, %f //len=%f\n", b.q.x, b.q.y, b.q.z, b.q.w, glm::length(b.q));
-			fprintf(fp, "X %f, %f, %f\n", rx.x, rx.y, rx.z);
-			fprintf(fp, "Y %f, %f, %f\n", ry.x, ry.y, ry.z);
-			fprintf(fp, "Z %f, %f, %f\n", rz.x, rz.y, rz.z);
-			fprintf(fp, "\n");
-			++boneindex;
-		}
-
-		fprintf(fp, "NUMVERTS %d\n", xms.vertices.size());
-		int nv = 0;
-		for (auto& v : xms.vertices)
-		{
-			fprintf(fp, "VERT %d\n", nv++);
-			fprintf(fp, "OFFSET %f, %f, %f\n", v.pos.x, v.pos.y, v.pos.z);
-			fprintf(fp, "BONES %d\n", v.numweights);
-			for (int k = 0; k < v.numweights; ++k)
-			{
-				fprintf(fp, "BONE %d %f\n", v.boneindices[k], v.boneweights[k]);
-			}
-			fprintf(fp, "\n");
-		}
-		fprintf(fp, "NUMFACES %d\n", xms.indices.size() / 3);
-		for (int i = 0; i < xms.indices.size(); i += 3)
-		{
-			fprintf(fp, "TRI 0 0 0 0\n");
-			auto& v1 = xms.vertices[xms.indices[i]];
-			auto& v2 = xms.vertices[xms.indices[i + 1]];
-			auto& v3 = xms.vertices[xms.indices[i + 2]];
-			for (int k = 0; k < 3; ++k)
-			{
-				auto& kv = xms.vertices[xms.indices[i + k]];
-				fprintf(fp, "VERT %d\n", xms.indices[i + k]);
-				fprintf(fp, "NORMAL %f %f %f\n", kv.normal.x, kv.normal.y, kv.normal.z);
-				fprintf(fp, "COLOR 1.000000 1.000000 1.000000 1.000000\n");
-				fprintf(fp, "UV 1 %f %f\n", kv.uv.x, kv.uv.y);
-			}
-			fprintf(fp, "\n");
-		}
-		fprintf(fp, "NUMOBJECTS 1\n");
-		fprintf(fp, "OBJECT 0 \"test\"\n");
-		fprintf(fp, "\n");
-		fprintf(fp, "NUMMATERIALS 1\n");
-		fprintf(fp, "MATERIAL 0 \"aa_default\" \"Lambert\" \"test.jpg\"\n");
-		fprintf(fp, "COLOR 0.000000 0.000000 0.000000 1.000000\n");
-		fprintf(fp, "TRANSPARENCY 0.000000 0.000000 0.000000 1.000000\n");
-		fprintf(fp, "AMBIENTCOLOR 0.000000 0.000000 0.000000 1.000000\n");
-		fprintf(fp, "INCANDESCENCE 0.000000 0.000000 0.000000 1.000000\n");
-		fprintf(fp, "COEFFS 0.800000 0.000000\n");
-		fprintf(fp, "GLOW 0.000000 0\n");
-		fprintf(fp, "REFRACTIVE 6 1.000000\n");
-		fprintf(fp, "SPECULARCOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
-		fprintf(fp, "REFLECTIVECOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
-		fprintf(fp, "REFLECTIVE -1 -1.000000\n");
-		fprintf(fp, "BLINN -1.000000 -1.000000\n");
-		fprintf(fp, "PHONG -1.000000\n");
-		//if(fp != stdout)
-		fclose(fp);
-	}
-};
 
 #pragma pack(push, 1)
 struct XBlendInfo
@@ -772,6 +995,74 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 	return true;
 }
 
+//Table from https://github.com/Scobalula/Greyhound/blob/development_v2/src/Greyhound/Greyhound.Logic/Helpers/XModelFileHelper.cs#L552
+//Which is taken from the given modtool files for CoD2
+
+typedef struct
+{
+	const char* bonename;
+	glm::vec3 offset;
+} bone_offset_table;
+
+static const bone_offset_table viewmodel_offsets_table[] = {
+	{ "tag_view",				vec3{0.f, 0.f, 0.f} },
+	{ "tag_torso",              vec3{-11.76486f, 0.f, -3.497466f} },
+	{ "j_shoulder_le",          vec3{2.859542f, 20.16072f, -4.597286f} },
+	{ "j_elbow_le",             vec3{30.7185f, -8E-06f, 3E-06f} },
+	{ "j_wrist_le",             vec3{29.3906f, 1.9E-05f, -3E-06f} },
+	{ "j_thumb_le_0",           vec3{2.786345f, 2.245192f, 0.85161f} },
+	{ "j_thumb_le_1",           vec3{4.806596f, -1E-06f, 3E-06f} },
+	{ "j_thumb_le_2",           vec3{2.433519f, -2E-06f, 1E-06f} },
+	{ "j_thumb_le_3",           vec3{3.f, -1E-06f, -1E-06f} },
+	{ "j_flesh_le",             vec3{4.822557f, 1.176307f, -0.110341f} },
+	{ "j_index_le_0",           vec3{10.53435f, 2.786251f, -3E-06f} },
+	{ "j_index_le_1",           vec3{4.563f, -3E-06f, 1E-06f} },
+	{ "j_index_le_2",           vec3{2.870304f, 3E-06f, -2E-06f} },
+	{ "j_index_le_3",           vec3{2.999999f, 4E-06f, 1E-06f} },
+	{ "j_mid_le_0",             vec3{10.71768f, 0.362385f, -0.38647f} },
+	{ "j_mid_le_1",             vec3{4.842623f, -1E-06f, -1E-06f} },
+	{ "j_mid_le_2",             vec3{2.957112f, -1E-06f, -1E-06f} },
+	{ "j_mid_le_3",             vec3{3.000005f, 4E-06f, 0.f} },
+	{ "j_ring_le_0",            vec3{9.843364f, -1.747671f, -0.401116f} },
+	{ "j_ring_le_1",            vec3{4.842618f, 4E-06f, -3E-06f} },
+	{ "j_ring_le_2",            vec3{2.755294f, -2E-06f, 5E-06f} },
+	{ "j_ring_le_3",            vec3{2.999998f, -2E-06f, -4E-06f} },
+	{ "j_pinky_le_0",           vec3{8.613766f, -3.707476f, 0.16818f} },
+	{ "j_pinky_le_1",           vec3{3.942609f, 1E-06f, 1E-06f} },
+	{ "j_pinky_le_2",           vec3{1.794117f, 3E-06f, -3E-06f} },
+	{ "j_pinky_le_3",           vec3{2.83939f, -1E-06f, 4E-06f} },
+	{ "j_wristtwist_le",        vec3{21.60379f, 1.2E-05f, -3E-06f} },
+	{ "j_shoulder_ri",          vec3{2.859542f, -20.16072f, -4.597286f} },
+	{ "j_elbow_ri",             vec3{-30.71852f, 4E-06f, -2.4E-05f} },
+	{ "j_wrist_ri",             vec3{-29.39067f, 4.4E-05f, 2.2E-05f} },
+	{ "j_thumb_ri_0",           vec3{-2.786155f, -2.245166f, -0.851634f} },
+	{ "j_thumb_ri_1",           vec3{-4.806832f, -6.6E-05f, 0.000141f} },
+	{ "j_thumb_ri_2",           vec3{-2.433458f, -3.8E-05f, -5.3E-05f} },
+	{ "j_thumb_ri_3",           vec3{-3.000123f, 0.00016f, 2.5E-05f} },
+	{ "j_flesh_ri",             vec3{-4.822577f, -1.176315f, 0.110318f} },
+	{ "j_index_ri_0",           vec3{-10.53432f, -2.786281f, -7E-06f} },
+	{ "j_index_ri_1",           vec3{-4.562927f, -5.8E-05f, 5.4E-05f} },
+	{ "j_index_ri_2",           vec3{-2.870313f, -6.5E-05f, 0.0001f} },
+	{ "j_index_ri_3",           vec3{-2.999938f, 0.000165f, -6.5E-05f} },
+	{ "j_mid_ri_0",             vec3{-10.71752f, -0.362501f, 0.386463f} },
+	{ "j_mid_ri_1",             vec3{-4.842728f, 0.000151f, 2.8E-05f} },
+	{ "j_mid_ri_2",             vec3{-2.957152f, -8.7E-05f, -2.2E-05f} },
+	{ "j_mid_ri_3",             vec3{-3.00006f, -6.8E-05f, -1.9E-05f} },
+	{ "j_ring_ri_0",            vec3{-9.843175f, 1.747613f, 0.401109f} },
+	{ "j_ring_ri_1",            vec3{-4.842774f, 0.000176f, -6.3E-05f} },
+	{ "j_ring_ri_2",            vec3{-2.755269f, -1.1E-05f, 0.000149f} },
+	{ "j_ring_ri_3",            vec3{-3.000048f, -4.1E-05f, -4.9E-05f} },
+	{ "j_pinky_ri_0",           vec3{-8.613756f, 3.707438f, -0.168202f} },
+	{ "j_pinky_ri_1",           vec3{-3.942537f, -0.000117f, -6.5E-05f} },
+	{ "j_pinky_ri_2",           vec3{-1.794038f, 0.000134f, 0.000215f} },
+	{ "j_pinky_ri_3",           vec3{-2.839375f, 5.6E-05f, -0.000115f} },
+	{ "j_wristtwist_ri",        vec3{-21.60388f, 9.7E-05f, 8E-06f} },
+	{ "tag_weapon",             vec3{38.5059f, 0.f, -17.15191f} },
+	{ "tag_cambone",            vec3{0.f, 0.f, 0.f} },
+	{ "tag_camera",             vec3{0.f, 0.f, 0.f} },
+	{NULL, vec3{0,0,0}}
+};
+
 bool read_xmodelparts(const std::string& path, xmodel &xm)
 {
 	xmodelparts& xmp = xm.xmp;
@@ -809,8 +1100,6 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 	std::vector<vec3> trans;
 
 	xmp.bones.resize(xmp.numbonestotal);
-	std::vector<int> parentList;
-	parentList.resize(xmp.numbonesrelative);
 
 	for (int i = 0; i < xmp.numbonesrelative; ++i)
 	{
@@ -825,7 +1114,6 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 
 		//mat4x4 mat = glm::toMat4(q);
 		//setTranslationForMatrix(mat, vv);
-		parentList[i] = i + xmp.numbonesabsolute - parent;
 		xmp.bones[i + 1].parent = parent;
 		//bones[i + 1].localMatrix = mat;
 		//bones[i + 1].q = q;
@@ -834,22 +1122,8 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 		//printf("v=%f,%f,%f\n", v.x, v.y, v.z);
 		//printf("x=%f,y=%f,z=%f,w=%f\n", q.x,q.y,q.z,q.w);
 	}
-#if 0
-	for (int i = 0; i < numbonesabsolute; ++i)
-	{
-		mat4x4 m;
-		m[0] = 0.0f;
-		m[1] = 0.0f;
-		m[2] = 0.0f;
-		m[3] = 1.0f;
 
-		m[4] = 0.0f;
-		m[5] = 0.0f;
-		m[6] = 0.0f;
-		m[7] = 2.f;
-	}
-#endif
-
+	bool viewhands = xm.path.find("viewmodel_hands") != std::string::npos;
 	for (int j = 0; j < xmp.numbonestotal; ++j)
 	{
 		std::string bone;
@@ -859,7 +1133,19 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 		if (bone.empty())
 			break;
 		xmp.bones[j].name = bone;
-
+		xmp.bonemap[bone] = j;
+		if (viewhands && j > 0)
+		{
+			for (int z = 0; viewmodel_offsets_table[z].bonename; ++z)
+			{
+				if (!strcmp(viewmodel_offsets_table[z].bonename, bone.c_str()))
+				{
+					//printf("replacing bone '%s' offset with %f,%f,%f\n", bone.c_str(), viewmodel_offsets_table[z].offset.x, viewmodel_offsets_table[z].offset.y, viewmodel_offsets_table[z].offset.z);
+					trans[j - 1] = viewmodel_offsets_table[z].offset / 2.54f;
+					break;
+				}
+			}
+		}
 		//printf("\bone %d: %s\n", j, bone.c_str());
 	}
 
@@ -974,21 +1260,17 @@ void test_xmodel()
 #endif
 }
 
-int main()
+bool read_xmodel(const std::string& basepath, const std::string& filename, xmodel& xm)
 {
-	std::string basepath = "F:/iwd/";
-	//read_xmodelparts();
-	//read_xanim();
-	//return 0;
-
+	xm.path = basepath + filename;
 	//buffer v = read_file(basepath + "xmodel/character_russian_diana_medic");
-	buffer v = read_file(basepath + "xmodel/playerbody_russian_coat01");
+	buffer v = read_file(xm.path);
 	//buffer v = read_file("F:/iwd/xmodel/prop_barrel_green");
 	//buffer v = read_file("F:\\SteamLibrary\\steamapps\\common\\Call of Duty 2\\main\\xmodel\\lolcow");
 	if (v.empty())
 	{
 		printf("empty\n");
-		return 0;
+		return false;
 	}
 	reader rd(v);
 	u16 version = rd.read<u16>();
@@ -1000,28 +1282,18 @@ int main()
 	printf("mins = %f,%f,%f\n", mins.x, mins.y, mins.z);
 	printf("maxs = %f,%f,%f\n", maxs.x, maxs.y, maxs.z);
 	int numlods = 0;
-	std::vector<std::string> lodstrings;
 	for (int i = 0; i < 4; ++i)
 	{
 		float dist = rd.read<float>();
 		std::string lodfilename;
 		u8 c;
-		while(( c = rd.read<u8>()))
+		while ((c = rd.read<u8>()))
 			lodfilename.push_back(c);
 		if (lodfilename.empty())
 			break;
 		printf("lod %d: %s (%f)\n", i, lodfilename.c_str(), dist);
 		++numlods;
-		lodstrings.push_back(lodfilename);
-	}
-	xmodel xm;
-	if (lodstrings.size() > 0)
-	{
-		read_xmodelparts(basepath + "xmodelparts/" + lodstrings[0], xm);
-		read_xmodelsurface(basepath + "xmodelsurfs/" + lodstrings[0], xm);
-		xm.write();
-		test_xmodel();
-		return 0;
+		xm.lods.push_back(lodfilename);
 	}
 	collisionLod_t collisionlod = (collisionLod_t)rd.read<i32>();
 	printf("collisionlod=%d\n", collisionlod);
@@ -1073,6 +1345,9 @@ int main()
 		}
 	}
 
+	//don't care about the mins maxs
+	return true;
+
 	for (int i = 0; i < xm.xmp.numbonestotal; ++i)
 	{
 		vec3 mins, maxs;
@@ -1098,10 +1373,37 @@ int main()
 		);
 	}
 
-	printf("offset=%d,0x%02X\n", rd.m_pos, rd.m_pos);
+	//printf("offset=%d,0x%02X\n", rd.m_pos, rd.m_pos);
 	//print_bytes((u8*)(v.data() + rd.m_pos), 200);
-	printf("%d/%d\n", rd.m_pos, rd.m_buf.size());
-	printf("\n");
+	//printf("%d/%d\n", rd.m_pos, rd.m_buf.size());
+	//printf("\n");
+	return true;
+}
+
+int main()
+{
+	//std::string basepath = "F:/iwd/";
+	std::string basepath = "F:/SteamLibrary/steamapps/common/Call of Duty 2/main/";
+#if 1
+	xmodel xm;
+	read_xmodel(basepath, "xmodel/lolcow", xm);
+
+	if (xm.lods.size() > 0)
+	{
+		read_xmodelparts(basepath + "xmodelparts/" + xm.lods[0], xm);
+		read_xmodelsurface(basepath + "xmodelsurfs/" + xm.lods[0], xm);
+		xm.write();
+		//test_xmodel();
+	}
+#endif
+	xanim xa;
+	if (!read_xanim(basepath, "xanim/lolcow_anim", xa, &xm))
+		printf("failed to read xanim\n");
+	else
+	{
+		printf("writing animation\n");
+		xa.write(&xm);
+	}
 	return 0;
 }
 
