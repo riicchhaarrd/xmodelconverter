@@ -1,0 +1,10 @@
+*.suo
+*.db
+*.ipch
+*.pdb
+*.tlog
+*.obj
+*.exe
+Debug/
+Release/
+.vs/
