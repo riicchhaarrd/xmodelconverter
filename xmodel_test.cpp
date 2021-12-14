@@ -584,7 +584,7 @@ struct xanim
 	}
 };
 
-void read_xanim_rotations(xanim& xa, reader& rd, const std::string& tag, bool flipquat, bool simplequat)
+void read_xanim_rotations(xanim& xa, reader& rd, const std::string& tag, bool flipquat, bool simplequat, xmodel* ref = nullptr)
 {
 	u16 numrot = rd.read<u16>();
 	//printf("numrot=%d\n", numrot);
@@ -638,7 +638,7 @@ void read_xanim_rotations(xanim& xa, reader& rd, const std::string& tag, bool fl
 	}
 }
 
-void read_xanim_translations(xanim &xa, reader& rd, const std::string& tag)
+void read_xanim_translations(xanim &xa, reader& rd, const std::string& tag, xmodel* ref = nullptr)
 {
 	u16 numtrans = rd.read<u16>();
 	if (numtrans == 0)
@@ -671,6 +671,9 @@ void read_xanim_translations(xanim &xa, reader& rd, const std::string& tag)
 	for (int i = 0; i < numtrans; ++i)
 	{
 		vec3 v = rd.read<vec3>();
+		int boneidx = ref->xmp.find_bone_index_by_name(tag);
+		assert(boneidx != -1);
+		MatrixTransformVectorQuatTrans(v, ref->xmp.matrices[ref->xmp.bones[boneidx].parent], v);
 		//printf("trans frame %d -> %f,%f,%f\n", frames[i], v.x, v.y, v.z);
 		xa.parts[tag].trans.insert(std::make_pair(frames[i], v));
 	}
@@ -703,8 +706,8 @@ bool read_xanim(const std::string& basepath, const std::string& filename, xanim&
 	//printf("frequency = %f\n", xa.frequency);
 	if (delta)
 	{
-		read_xanim_rotations(xa, rd, "tag_origin", false, true);
-		read_xanim_translations(xa, rd, "tag_origin");
+		read_xanim_rotations(xa, rd, "tag_origin", false, true, ref);
+		read_xanim_translations(xa, rd, "tag_origin", ref);
 	}
 	if (looping)
 		++xa.numframes;
@@ -725,8 +728,8 @@ bool read_xanim(const std::string& basepath, const std::string& filename, xanim&
 		bool flipquat = ((1 << (i & 7)) & flipflags[i >> 3]) != 0;
 		bool simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
 
-		read_xanim_rotations(xa, rd, xa.partnames[i], flipquat, simplequat);
-		read_xanim_translations(xa, rd, xa.partnames[i]);
+		read_xanim_rotations(xa, rd, xa.partnames[i], flipquat, simplequat, ref);
+		read_xanim_translations(xa, rd, xa.partnames[i], ref);
 	}
 	return true;
 
