@@ -40,6 +40,25 @@ buffer read_file(const std::string& _path)
 	return v;
 }
 
+void decompose(const glm::mat4& mat, glm::vec3& x, glm::vec3& y, glm::vec3& z, glm::vec3& trans)
+{
+	x.x = mat[0][0];
+	x.y = mat[1][0];
+	x.z = mat[2][0];
+
+	y.x = mat[0][1];
+	y.y = mat[1][1];
+	y.z = mat[2][1];
+
+	z.x = mat[0][2];
+	z.y = mat[1][2];
+	z.z = mat[2][2];
+
+	trans.x = mat[0][3];
+	trans.y = mat[1][3];
+	trans.z = mat[2][3];
+}
+
 struct xbone
 {
 	std::string name;
@@ -136,6 +155,17 @@ struct DObjAnimMat_s
 	glm::quat quat;
 	glm::vec3 trans;
 	float transWeight = 0.0f;
+
+	glm::mat4 toMatrix()
+	{
+		mat4 mat = glm::toMat4(quat);
+		//set translation part
+		mat[0][3] = trans.x;
+		mat[1][3] = trans.y;
+		mat[2][3] = trans.z;
+		mat[3][3] = 1.f;
+		return mat;
+	}
 };
 
 struct xmodelparts
@@ -146,6 +176,42 @@ struct xmodelparts
 	u16 numbonestotal;
 	u16 numbonesrelative;
 	u16 numbonesabsolute;
+
+	struct genbone
+	{
+		mat4 bp, ibp, offsetmatrix, localmatrix;
+	};
+
+	std::vector<genbone> genbones;
+
+	void calculate_bone_matrices()
+	{
+		genbones.resize(matrices.size());
+		int boneindex = 0;
+		for(auto & it : matrices)
+		{
+			glm::mat4 bp = it.toMatrix();
+			glm::mat4 ibp = glm::inverse(bp);
+
+			if (bones[boneindex].parent != -1)
+				bp = genbones[bones[boneindex].parent].bp * bp;
+			genbones[boneindex].bp = bp;
+			genbones[boneindex].ibp = ibp;
+			++boneindex;
+		}
+		boneindex = 0;
+		for (auto& it : matrices)
+		{
+			glm::mat4 off = it.toMatrix();
+			if (bones[boneindex].parent != -1)
+			{
+				off /= matrices[bones[boneindex].parent].toMatrix();
+			}
+			genbones[boneindex].localmatrix = off;
+			genbones[boneindex].offsetmatrix = genbones[boneindex].ibp * it.toMatrix();
+			++boneindex;
+		}
+	}
 
 	int find_bone_index_by_name(const std::string& name)
 	{
@@ -200,6 +266,7 @@ struct xmodel
 
 	bool write()
 	{
+		xmp.calculate_bone_matrices();
 		FILE* fp = NULL;
 		//fp = stdout;
 		fopen_s(&fp, "test.xmodel_export", "w");
@@ -223,14 +290,10 @@ struct xmodel
 			glm::vec3 rx;
 			glm::vec3 ry;
 			glm::vec3 rz;
-			mat4 getWorldMatrix2(std::vector<xbone>&bones, std::vector<DObjAnimMat_s>&matrices, int index);
-			mat4 worldMatrix = getWorldMatrix2(xmp.bones, xmp.matrices, boneindex);
-			auto& mat = worldMatrix;
-			void getXYZFromMatrix(const glm::mat4 & mat, glm::vec3 & rx, glm::vec3 & ry, glm::vec3 & rz);
-			getXYZFromMatrix(mat, rx, ry, rz);
 			glm::vec3 offset;
-			void getTranslationFromMatrix(const glm::mat4 & mat, glm::vec3 & v);
-			getTranslationFromMatrix(mat, offset);
+			//mat4 worldMatrix = getWorldMatrix2(xmp.bones, xmp.matrices, boneindex);
+			mat4 mat = xmp.matrices[boneindex].toMatrix();
+			decompose(mat, rx, ry, rz, offset);
 			fprintf(fp, "BONE %d\n", boneindex);
 			//printf("BONE %d //bone name: %s, parent bone name: %s\n", boneindex, b.name.c_str(), b.parent==-1?"no parent":bones[b.parent].name.c_str());
 			//printf("OFFSET %f, %f, %f\n", b.offset.x, b.offset.y, b.offset.z);
@@ -248,8 +311,20 @@ struct xmodel
 		int nv = 0;
 		for (auto& v : xms.vertices)
 		{
+			glm::mat4 mat(1.f);
+			assert(v.numweights > 0);
+			mat = xmp.genbones[v.boneindices[0]].offsetmatrix * v.boneweights[0];
+#if 1
+			for (int k = 1; k < v.numweights; ++k)
+			{
+				mat += xmp.genbones[v.boneindices[k]].ibp * v.boneweights[k];
+			}
+#endif
+			glm::vec4 pos4 = glm::vec4(v.pos,1.f);
+			pos4 = pos4 * mat;
+			glm::vec3 pos = v.pos;// glm::vec3(pos4);
 			fprintf(fp, "VERT %d\n", nv++);
-			fprintf(fp, "OFFSET %f, %f, %f\n", v.pos.x, v.pos.y, v.pos.z);
+			fprintf(fp, "OFFSET %f, %f, %f\n", pos.x, pos.y, pos.z);
 			fprintf(fp, "BONES %d\n", v.numweights);
 			for (int k = 0; k < v.numweights; ++k)
 			{
@@ -296,87 +371,6 @@ struct xmodel
 	}
 };
 
-void getTranslationFromMatrix(const glm::mat4& mat, glm::vec3& v)
-{
-	v.x = mat[3][0];
-	v.y = mat[3][1];
-	v.z = mat[3][2];
-}
-
-void setTranslationForMatrix(glm::mat4& mat, const glm::vec3& v)
-{
-	mat[3][0] = v.x;
-	mat[3][1] = v.y;
-	mat[3][2] = v.z;
-	mat[3][3] = 1.f;
-}
-
-void createMatrix(DObjAnimMat_s& mat, float *matrix)
-{
-	float x = mat.transWeight * mat.quat.x;
-	float y = mat.transWeight * mat.quat.y;
-	float z = mat.transWeight * mat.quat.z;
-	float xx = x * mat.quat.x;
-	float y2 = x * mat.quat.y;
-	float xy = x * y2;
-	float z2 = mat.quat.z;
-	float xz = x * z2;
-	float w2 = mat.quat.w;
-	float xw = x * w2;
-	float yy = y2 * y;
-	float yz = y * z2;
-	float yw = y * w2;
-	float zz = z2 * z;
-	float zw = z * w2;
-
-	matrix[0] = 1.f - (yy + zz);
-	matrix[1] = zw + xy;
-	matrix[2] = xz - yw;
-	matrix[3] = 0.f;
-
-	matrix[4] = xy - zw;
-	matrix[5] = 1.f - (zz + xx);
-	matrix[6] = xw + yz;
-	matrix[7] = 0.f;
-
-	matrix[8] = xz + yw;
-	matrix[9] = yz - xw;
-	matrix[10] = 1.f - (xx + yy);
-	matrix[11] = 0.f;
-
-	matrix[12] = mat.trans.x;
-	matrix[13] = mat.trans.y;
-	matrix[14] = mat.trans.z;
-	matrix[15] = 1.f;
-}
-
-vec3 transformTranslationVector(DObjAnimMat_s& mat, const vec3& in)
-{
-	vec3 out;
-	float m[16];
-	createMatrix(mat, m);
-	out.x = (in.x * m[0]) + (in.y * m[4]) + (in.z * m[8]) + m[12];
-	out.y = (in.x * m[1]) + (in.y * m[5]) + (in.z * m[9]) + m[13];
-	out.z = (in.x * m[2]) + (in.y * m[6]) + (in.z * m[10]) + m[14];
-	return out;
-}
-
-void MatrixTransformVectorByMatrix()
-{
-	vec3 v;
-	vec3 offset;
-
-	mat4x4 m;
-	auto* mp = &m[0][0];
-	glm::vec4 b(v, 1.0f);
-
-	v = glm::vec3(b * m);
-
-	v.x = offset.x * mp[0] + offset.y * mp[4] + offset.z * mp[8] + mp[12];
-	v.y = offset.x * mp[1] + offset.y * mp[5] + offset.z * mp[9] + mp[13];
-	v.z = offset.x * mp[2] + offset.y * mp[6] + offset.z * mp[10] + mp[14];
-}
-
 void MatrixTransformVectorQuatTrans(vec3& a, DObjAnimMat_s& b, vec3& out)
 {
 	float x = b.transWeight * b.quat.x;
@@ -403,75 +397,12 @@ void MatrixTransformVectorQuatTrans(vec3& a, DObjAnimMat_s& b, vec3& out)
 	out.z = ((((xz - yw) * a.x) + ((xw + yz) * a.y)) + ((1.0 - (xx + yy)) * a.z)) + b.trans.z;
 }
 
-mat4 getWorldMatrix(std::vector<xbone>& bones, int index)
+mat4 getWorldMatrix(std::vector<xbone>& bones, std::vector<DObjAnimMat_s>& matrices, int index)
 {
 	auto& bone = bones[index];
-	if (bone.parent == -1)
-	{
-		return bone.localMatrix;
-	}
-	return getWorldMatrix(bones, bone.parent) * bone.localMatrix;
-}
-
-glm::mat4 getMatrixForDObjMatrix(const DObjAnimMat_s& m)
-{
-	mat4 mat = glm::toMat4(m.quat);
-	setTranslationForMatrix(mat, m.trans);
-	return mat;
-}
-
-mat4 getWorldMatrix2(std::vector<xbone>& bones, std::vector<DObjAnimMat_s>& matrices, int index)
-{
-	auto& bone = bones[index];
-	mat4 local = getMatrixForDObjMatrix(matrices[index]);
-	return local;
-	if (bone.parent == -1)
-	{
-		return local;
-	}
-	return getWorldMatrix2(bones, matrices, bone.parent) * local;
-}
-
-mat4 getWorldMatrix3(std::vector<xbone>& bones, std::vector<DObjAnimMat_s>& matrices, int index)
-{
-	auto& bone = bones[index];
-	mat4 local = getMatrixForDObjMatrix(matrices[index]);
-	if (bone.parent == -1)
-	{
-		return local;
-	}
-	return getWorldMatrix3(bones, matrices, bone.parent) * local;
-}
-
-glm::mat4 getMatrixFromXYZ(const glm::vec3& _x, const glm::vec3& _y, const glm::vec3& _z)
-{
-	glm::mat4 _mat(0.f);
-	_mat[0][0] = _x.x;
-	_mat[0][1] = _x.y;
-	_mat[0][2] = _x.z;
-	_mat[0][3] = 0.f;
-	_mat[1][0] = _y.x;
-	_mat[1][1] = _y.y;
-	_mat[1][2] = _y.z;
-	_mat[1][3] = 0.f;
-	_mat[2][0] = _z.x;
-	_mat[2][1] = _z.y;
-	_mat[2][2] = _z.z;
-	_mat[2][3] = 0.f;
-	return _mat;
-}
-
-void getXYZFromMatrix(const glm::mat4& mat, glm::vec3& rx, glm::vec3& ry, glm::vec3& rz)
-{
-	rx.x = mat[0][0];
-	rx.y = mat[0][1];
-	rx.z = mat[0][2];
-	ry.x = mat[1][0];
-	ry.y = mat[1][1];
-	ry.z = mat[1][2];
-	rz.x = mat[2][0];
-	rz.y = mat[2][1];
-	rz.z = mat[2][2];
+	if(bone.parent==-1)
+		return matrices[index].toMatrix();
+	return getWorldMatrix(bones, matrices, bone.parent) * matrices[index].toMatrix();
 }
 
 vec3 read_vec3(reader& rd)
@@ -482,21 +413,54 @@ vec3 read_vec3(reader& rd)
 	v.z = rd.read<float>();
 	return v;
 }
-struct iquat { int x, y, z, w; };
-void read_quat(reader& rd, iquat& q)
+struct iquat {
+	int x, y, z, w;
+	glm::quat fquat()
+	{
+		quat tmp;
+		tmp.x = (float)x / (float)SHRT_MAX;
+		tmp.y = (float)y / (float)SHRT_MAX;
+		tmp.z = (float)z / (float)SHRT_MAX;
+		tmp.w = (float)w / (float)SHRT_MAX;
+		return tmp;
+	}
+};
+void read_quat(reader& rd, quat& oq, bool flipquat = false)
 {
+	iquat q;
 	q.x = rd.read<i16>();
 	q.y = rd.read<i16>();
 	q.z = rd.read<i16>();
 	q.w = 0;
 	//q.w = glm::dot(glm::vec3(q.x, q.y, q.z), glm::vec3(0, 0, -1.f));
-#if 1
 	int t = 0x3fff0001 - (q.x * q.x + q.y * q.y + q.z * q.z);
 	if (t > 0)
 	{
 		q.w = (int)floorf(sqrtf((float)t) + 0.5f);
 	}
-#endif
+	if (flipquat)
+	{
+		q.z = -q.z;
+		q.w = -q.w;
+	}
+	oq = q.fquat();
+}
+
+void read_simple_quat(reader& rd, quat& oq, bool flipquat)
+{
+
+	iquat q;
+	q.x = q.y = q.w = 0;
+	q.z = rd.read<i16>();
+	int t = 0x3fff0001 - q.z * q.z;
+	if (t > 0)
+		q.w = (int)floorf(sqrtf((float)t) + 0.5f);
+	if (flipquat)
+	{
+		q.z = -q.z;
+		q.w = -q.w;
+	}
+	oq = q.fquat();
 }
 
 void print_quat(const quat& q)
@@ -509,8 +473,10 @@ void print_quat(const quat& q)
 
 struct xanimpart
 {
-	std::map<int, vec3> trans;
-	std::map<int, quat> rot;
+	std::string name;
+	std::map<int, DObjAnimMat_s> mats;
+	//std::map<int, vec3> trans;
+	//std::map<int, quat> rot;
 };
 
 struct xanim
@@ -522,8 +488,10 @@ struct xanim
 
 	float frequency;
 
-	std::vector<std::string> partnames;
-	std::unordered_map<std::string, xanimpart> parts;
+	//std::vector<std::string> partnames;
+	//std::unordered_map<std::string, xanimpart> parts;
+	std::vector<xanimpart> parts;
+	std::unordered_map<std::string, int> partslookup;
 
 	void write(xmodel *ref)
 	{
@@ -535,11 +503,12 @@ struct xanim
 		fprintf(fp, "ANIMATION\n");
 		fprintf(fp, "VERSION 3\n");
 		fprintf(fp, "\n");
-		fprintf(fp, "NUMPARTS %d\n", partnames.size());
+
+		fprintf(fp, "NUMPARTS %d\n", parts.size());
 		int partindex = 0;
-		for (auto& it : partnames)
+		for (auto& it : parts)
 		{
-			fprintf(fp, "PART %d \"%s\"\n", partindex++, it.c_str());
+			fprintf(fp, "PART %d \"%s\"\n", partindex++, it.name.c_str());
 		}
 		fprintf(fp, "\n");
 		fprintf(fp, "FRAMERATE %d\n", framerate);
@@ -549,22 +518,37 @@ struct xanim
 		{
 			fprintf(fp, "FRAME %d\n", i);
 			partindex = 0;
-			for (auto& it : partnames)
+			for (auto& part : parts)
 			{
-				auto& part = parts[it];
-				auto& rot = part.rot[i];
-				auto& trans = part.trans[i];
+				//auto& rot = part.rot[i];
+				//auto& trans = part.trans[i];
+				//glm::mat4 m = glm::toMat4(rot);
+				//glm::mat4 wm = getWorldMatrix3(ref->xmp.bones, ref->xmp.matrices, partindex);
+				//m = m * wm;
+
+				auto boneidx = ref->xmp.find_bone_index_by_name(part.name);
+				glm::mat4 mat;
+
+				if (boneidx != -1)
+				{
+					int parentidx = ref->xmp.bones[boneidx].parent;
+					if (part.name != "j_hip_le")
+					{
+						mat = getWorldMatrix(ref->xmp.bones, ref->xmp.matrices, boneidx);
+					}
+					else
+					{
+						mat = part.mats[i].toMatrix();
+					}
+				}
+
+				glm::vec3 x, y, z, offset;
+				decompose(mat, x, y, z, offset);
+
 				fprintf(fp, "PART %d\n", partindex);
-				fprintf(fp, "OFFSET %f, %f, %f\n", trans.x, trans.y, trans.z);
+				fprintf(fp, "OFFSET %f, %f, %f\n", offset.x, offset.y, offset.z);
 				fprintf(fp, "SCALE 1.000000, 1.000000, 1.000000\n");
-				glm::mat4 m = glm::toMat4(rot);
 
-				glm::mat4 wm = getWorldMatrix3(ref->xmp.bones, ref->xmp.matrices, partindex);
-
-				m = m * wm;
-
-				glm::vec3 x, y, z;
-				getXYZFromMatrix(m, x, y, z);
 				fprintf(fp, "X %f, %f, %f\n", x.x, x.y, x.z);
 				fprintf(fp, "Y %f, %f, %f\n", y.x, y.y, y.z);
 				fprintf(fp, "Z %f, %f, %f\n", z.x, z.y, z.z);
@@ -574,7 +558,7 @@ struct xanim
 			}
 		}
 		fprintf(fp, "NOTETRACKS\n");
-		for (int i = 0; i < partnames.size(); ++i)
+		for (int i = 0; i < parts.size(); ++i)
 		{
 			fprintf(fp, "PART %d\n", i);
 			fprintf(fp, "NUMTRACKS 0\n");
@@ -584,7 +568,7 @@ struct xanim
 	}
 };
 
-void read_xanim_rotations(xanim& xa, reader& rd, const std::string& tag, bool flipquat, bool simplequat, xmodel* ref = nullptr)
+void read_xanim_rotations(xanim& xa, reader& rd, int partindex, bool flipquat, bool simplequat, xmodel* ref = nullptr)
 {
 	u16 numrot = rd.read<u16>();
 	//printf("numrot=%d\n", numrot);
@@ -612,33 +596,16 @@ void read_xanim_rotations(xanim& xa, reader& rd, const std::string& tag, bool fl
 	float x, y, z, w;
 	for (int i = 0; i < numrot; ++i)
 	{
+		glm::quat q;
 		if (simplequat)
-		{
-			x = y = z = w = 0.f;
-			z = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
-			w = 1.f - x * x - y * y - z * z;
-
-			if (fabs(w) >= 0.01f)
-				w = sqrtf(w);
-			//printf("simplequat frame %d -> %f,%f,%f,%f\n", frames[i], x, y, z, w);
-			xa.parts[tag].rot.insert(std::make_pair(frames[i], glm::quat(x,y,z,w)));
-		} else {
-
-			x = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
-			y = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
-			z = ((float)rd.read<i16>()) / ((float)SHRT_MAX);
-			w = 1.f - x * x - y * y - z * z;
-
-			if (fabs(w) >= 0.01f)
-				w = sqrtf(w);
-
-			//printf("else frame %d -> %f,%f,%f,%f\n", frames[i], x, y, z, w);
-			xa.parts[tag].rot.insert(std::make_pair(frames[i], glm::quat(x, y, z, w)));
-		}
+			read_simple_quat(rd, q, flipquat);
+		else
+			read_quat(rd, q, flipquat);
+		xa.parts[partindex].mats[frames[i]].quat = q;
 	}
 }
 
-void read_xanim_translations(xanim &xa, reader& rd, const std::string& tag, xmodel* ref = nullptr)
+void read_xanim_translations(xanim &xa, reader& rd, int partindex, xmodel* ref = nullptr)
 {
 	u16 numtrans = rd.read<u16>();
 	if (numtrans == 0)
@@ -671,11 +638,8 @@ void read_xanim_translations(xanim &xa, reader& rd, const std::string& tag, xmod
 	for (int i = 0; i < numtrans; ++i)
 	{
 		vec3 v = rd.read<vec3>();
-		int boneidx = ref->xmp.find_bone_index_by_name(tag);
-		assert(boneidx != -1);
-		MatrixTransformVectorQuatTrans(v, ref->xmp.matrices[ref->xmp.bones[boneidx].parent], v);
 		//printf("trans frame %d -> %f,%f,%f\n", frames[i], v.x, v.y, v.z);
-		xa.parts[tag].trans.insert(std::make_pair(frames[i], v));
+		xa.parts[partindex].mats[frames[i]].trans = v;
 	}
 }
 
@@ -704,10 +668,14 @@ bool read_xanim(const std::string& basepath, const std::string& filename, xanim&
 	//printf("framerate=%d\n", xa.framerate);
 	xa.frequency = ((float)xa.framerate) / ((float)xa.numframes);
 	//printf("frequency = %f\n", xa.frequency);
+	xa.parts.resize(xa.numbones + 1); //+1 for tag_origin
+	xa.parts[0].name = "tag_origin";
+	xa.partslookup["tag_origin"] = 0;
 	if (delta)
 	{
-		read_xanim_rotations(xa, rd, "tag_origin", false, true, ref);
-		read_xanim_translations(xa, rd, "tag_origin", ref);
+		//read tag_origin
+		read_xanim_rotations(xa, rd, 0, false, true, ref);
+		read_xanim_translations(xa, rd, 0, ref);
 	}
 	if (looping)
 		++xa.numframes;
@@ -720,131 +688,67 @@ bool read_xanim(const std::string& basepath, const std::string& filename, xanim&
 		std::string bonename;
 		if (!rd.read_null_terminated_string(bonename))
 			break;
-		xa.partnames.push_back(bonename);
-		//printf("bonename: %s\n", bonename.c_str());
+		xa.parts[i + 1].name = bonename;
+		xa.partslookup[bonename] = i + 1;
+		//printf("bonename: %s -> %d\n", bonename.c_str(), i);
 	}
 	for (int i = 0; i < xa.numbones; ++i)
 	{
 		bool flipquat = ((1 << (i & 7)) & flipflags[i >> 3]) != 0;
 		bool simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
 
-		read_xanim_rotations(xa, rd, xa.partnames[i], flipquat, simplequat, ref);
-		read_xanim_translations(xa, rd, xa.partnames[i], ref);
-	}
-	return true;
+		read_xanim_rotations(xa, rd, i + 1, flipquat, simplequat, ref);
+		read_xanim_translations(xa, rd, i + 1, ref);
 
-#if 0
-	if (delta)
-	{
-		//TODO: FIX delta for AI anims broken atm
-		u16 type = rd.read<u16>();
-		if (type == 1)
+		auto& bonename = xa.parts[i + 1].name;
+		//find the bone
+		int boneidx = ref->xmp.find_bone_index_by_name(bonename);
+		if (boneidx == -1)continue;
+		int parentidx = ref->xmp.bones[boneidx].parent;
+		auto* parent = &ref->xmp.bones[parentidx];
+		assert(parentidx != -1);
+		for (int frameno = 0; frameno < xa.numframes; ++frameno)
 		{
-			iquat q;
-			read_quat(rd, q);
-			//TODO: FIXME
-		}
-		else
-		{
-			if (type >= xa.numframes)
+			int xaparentidx = -1;
+			while (1)
 			{
-				FIXME();
-			}
-			else if (xa.numframes <= 256)
-			{
-				//FIXME();
-				printf("type=%d\n", type);
-				int n = type + 7;
-				for (int i = 0; i < n; ++i)
+				auto fnd = xa.partslookup.find(parent->name);
+				if (fnd != xa.partslookup.end())
 				{
-					printf("byte %d\n", rd.read<u8>() & 0xff);
-				}
-			}
-			else
-			{
-				FIXME();
-			}
-		}
-	}
-
-	int numquatbytes = ((xa.numbones - 1) >> 3) + 1;
-
-	std::vector<int> unknownbits;
-	std::vector<int> simplequatbits;
-	unknownbits.resize(numquatbytes);
-	simplequatbits.resize(numquatbytes);
-	for (int i = 0; i < numquatbytes; ++i)
-	{
-		unknownbits[i] = (int)rd.read<u8>();
-		printf("unknownbits bits: %d\n", unknownbits[i] & 0xff);
-	}
-	for (int i = 0; i < numquatbytes; ++i)
-	{
-		simplequatbits[i] = (int)rd.read<u8>();
-		printf("quat bits: %d\n", simplequatbits[i] & 0xff);
-	}
-	printf("%d/%d\n", rd.m_pos, rd.m_buf.size());
-
-	for (int j = 0; j < xa.numbones; ++j)
-	{
-		std::string bone;
-		u8 c;
-		while ((c = rd.read<u8>()))
-			bone.push_back(c);
-		if (bone.empty())
-			break;
-		printf("bone %d: %s\n", j, bone.c_str());
-	}
-
-	for (int i = 0; i < xa.numbones; ++i)
-	{
-		int a = (unknownbits[i >> 3] >> (i & 7)) & 1;
-		int b = (simplequatbits[i >> 3] >> (i & 7)) & 1;
-		u16 some_type = rd.read<u16>();
-		assert(some_type != 0);
-		if (some_type != 1)
-		{
-			u16 value_b = rd.read<u16>();
-			printf("value_b = %d\n", value_b);
-			if (value_b == 1)
-			{
-				i32 x = rd.read<i32>();
-				i32 y = rd.read<i32>();
-				i32 z = rd.read<i32>();
-				printf("x=%d,y=%d,z=%d\n", x, y, z);
-			}
-			else
-			{
-				assert(numframes > value_b);
-				if (xa.numframes <= 256)
-				{
-					printf("LOWER\n");
-					for (int k = 0; k < value_b / 2; ++k)
-					{
-						printf("%d\n", rd.read<u16>());
-					}
+					xaparentidx = fnd->second;
 					break;
 				}
 				else
-					perror("OMG");
+				{
+					if (parent->parent == -1)
+					{
+						xaparentidx = 0; //tag_origin
+						break;
+					}
+					else
+					{
+						parent = &ref->xmp.bones[parent->parent];
+					}
+				}
 			}
-		}
-		if (b)
-		{
-			u16 coeff = rd.read<u16>();
-			int v54 = 0x3fff0001 - coeff * coeff;
-			if (v54 <= 0)
+			assert(xaparentidx != -1);
+
+			quat q = xa.parts[xaparentidx].mats[frameno].quat * xa.parts[i+1].mats[frameno].quat;
+			float t = glm::dot(q, q);
+			if (fabs(t) < 0.01f)
 			{
-				printf("v54 zero\n");
+				q.w = 1.f;
+				xa.parts[i + 1].mats[frameno].transWeight = 2.f;
 			}
 			else
 			{
-				printf("got v54 = %d\n", (int)floorf(sqrtf(v54) + 0.5f));
+				xa.parts[i + 1].mats[frameno].transWeight = 2.f / t;
 			}
-			break;
+			xa.parts[i + 1].mats[frameno].quat = q;
+			MatrixTransformVectorQuatTrans(xa.parts[i + 1].mats[frameno].trans, xa.parts[xaparentidx].mats[frameno], xa.parts[i + 1].mats[frameno].trans);
 		}
 	}
-#endif
+	return true;
 
 #if 0
 	//at end of file
@@ -951,10 +855,9 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 				boneindex = rd.read<u16>();
 
 				offset = rd.read<vec3>();
-
-				mat4 mat = getWorldMatrix2(xm.xmp.bones, xm.xmp.matrices, boneindex);
-				vtx.pos = glm::vec3(mat * glm::vec4(offset,1.f));
-				//MatrixTransformVectorQuatTrans(offset, xm.xmp.matrices[xm.xmp.bones[boneindex].parent], vtx.pos);
+				
+				mat4 mat = xm.xmp.matrices[boneindex].toMatrix();
+				glm::vec4 pos4 = glm::vec4(offset, 1.0f);
 				vtx.numweights = numweights + 1;
 				vtx.boneweights[0] = 1.f;
 				vtx.boneindices[0] = boneindex;
@@ -963,6 +866,8 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 				{
 					boneweight = rd.read<u8>();
 					vtx.boneweights[0] = ((float)boneweight) / 256.f;
+
+					//mat = xm.xmp.matrices[boneindex].toMatrix() * vtx.boneweights[0];
 #if 0
 					printf("n=%f,%f,%f,uv=%f,%f,numweights=%d,offset=%f,%f,%f,boneoffset=%d,boneweight=%d\n",
 						n.x, n.y, n.z, u, v, numweights, offset.x, offset.y, offset.z, boneoffset, boneweight & 0xff
@@ -974,9 +879,14 @@ bool read_xmodelsurface(const std::string& path, xmodel &xm)
 						blendinfo[k + 1] = rd.read<XBlendInfo>();
 						vtx.boneweights[k + 1] = ((float)blendinfo[k + 1].boneweight) / (float)USHRT_MAX;
 						vtx.boneindices[k + 1] = blendinfo[k + 1].boneindex;
+
+						//mat += xm.xmp.matrices[vtx.boneindices[k + 1]].toMatrix() * vtx.boneweights[k + 1];
 						//printf("\t%d: offset: %f,%f,%f boneoffset: %d, boneweight: %d\n", k, blendinfo[k].offset.x, blendinfo[k].offset.y, blendinfo[k].offset.z, blendinfo[k].boneoffset, blendinfo[k].boneweight);
 					}
 				}
+				//vtx.pos = glm::vec3(glm::vec4(offset, 1.f) * mat);
+				//vtx.pos = offset;
+				MatrixTransformVectorQuatTrans(offset, xm.xmp.matrices[xm.xmp.bones[boneindex].parent], vtx.pos);
 			}
 			vertices.push_back(vtx);
 		}
@@ -1069,7 +979,7 @@ static const bone_offset_table viewmodel_offsets_table[] = {
 bool read_xmodelparts(const std::string& path, xmodel &xm)
 {
 	xmodelparts& xmp = xm.xmp;
-#if 1
+#if 0
 	glm::vec3 _x(0.f,-0.063739f,0.0997967f);
 	glm::vec3 _y(1.0f,0.0f,0.0f);
 	glm::vec3 _z(-0.0f,0.997967f,0.063739f);
@@ -1099,7 +1009,7 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 
 	printf("version = %d\n", version);
 	printf("numbonestotal = %d\n", xmp.numbonestotal);
-	std::vector<iquat> quats;
+	std::vector<glm::quat> quats;
 	std::vector<vec3> trans;
 
 	xmp.bones.resize(xmp.numbonestotal);
@@ -1109,7 +1019,7 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 		int parent = rd.read<i8>();
 		//printf("byte=%d\n", byte & 0xff);
 		vec3 vv = read_vec3(rd);
-		iquat q;
+		glm::quat q;
 		read_quat(rd, q);
 
 		quats.push_back(q);
@@ -1174,12 +1084,7 @@ bool read_xmodelparts(const std::string& path, xmodel &xm)
 	for (int i = 0; i < xmp.numbonesrelative; ++i)
 	{
 		//auto* parentBoneMat = &matPtr[-parentList[i]];
-		quat tmp;
-		tmp.x = (float)quats[i].x / (float)SHRT_MAX;
-		tmp.y = (float)quats[i].y / (float)SHRT_MAX;
-		tmp.z = (float)quats[i].z / (float)SHRT_MAX;
-		tmp.w = (float)quats[i].w / (float)SHRT_MAX;
-		quat q = xmp.matrices[xmp.bones[i + 1].parent].quat * tmp;// QuatMultiply(tmp, parentBoneMat->quat);
+		quat q = xmp.matrices[xmp.bones[i + 1].parent].quat * quats[i];// QuatMultiply(tmp, parentBoneMat->quat);
 		float t = glm::dot(q, q);
 		if (fabs(t) < 0.01f)
 		{
@@ -1385,11 +1290,12 @@ bool read_xmodel(const std::string& basepath, const std::string& filename, xmode
 
 int main()
 {
-	//std::string basepath = "F:/iwd/";
-	std::string basepath = "F:/SteamLibrary/steamapps/common/Call of Duty 2/main/";
+	std::string basepath = "F:/iwd/";
+	//std::string basepath = "F:/SteamLibrary/steamapps/common/Call of Duty 2/main/";
 #if 1
 	xmodel xm;
-	read_xmodel(basepath, "xmodel/lolcow", xm);
+	//read_xmodel(basepath, "xmodel/lolcow", xm);
+	read_xmodel(basepath, "xmodel/playerbody_default", xm);
 
 	if (xm.lods.size() > 0)
 	{
@@ -1400,7 +1306,7 @@ int main()
 	}
 #endif
 	xanim xa;
-	if (!read_xanim(basepath, "xanim/lolcow_anim", xa, &xm))
+	if (!read_xanim(basepath, "xanim/pb_walk_forward", xa, &xm))
 		printf("failed to read xanim\n");
 	else
 	{
