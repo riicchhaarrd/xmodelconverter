@@ -1,0 +1,67 @@
+#pragma once
+//Table from https://github.com/Scobalula/Greyhound/blob/development_v2/src/Greyhound/Greyhound.Logic/Helpers/XModelFileHelper.cs#L552
+
+typedef struct
+{
+	const char* bonename;
+	glm::vec3 offset;
+} bone_offset_table_t;
+
+static const bone_offset_table_t viewmodel_offsets_table[] = {
+	{ "tag_view",				glm::vec3{0.f, 0.f, 0.f} },
+	{ "tag_torso",              glm::vec3{-11.76486f, 0.f, -3.497466f} },
+	{ "j_shoulder_le",          glm::vec3{2.859542f, 20.16072f, -4.597286f} },
+	{ "j_elbow_le",             glm::vec3{30.7185f, -8E-06f, 3E-06f} },
+	{ "j_wrist_le",             glm::vec3{29.3906f, 1.9E-05f, -3E-06f} },
+	{ "j_thumb_le_0",           glm::vec3{2.786345f, 2.245192f, 0.85161f} },
+	{ "j_thumb_le_1",           glm::vec3{4.806596f, -1E-06f, 3E-06f} },
+	{ "j_thumb_le_2",           glm::vec3{2.433519f, -2E-06f, 1E-06f} },
+	{ "j_thumb_le_3",           glm::vec3{3.f, -1E-06f, -1E-06f} },
+	{ "j_flesh_le",             glm::vec3{4.822557f, 1.176307f, -0.110341f} },
+	{ "j_index_le_0",           glm::vec3{10.53435f, 2.786251f, -3E-06f} },
+	{ "j_index_le_1",           glm::vec3{4.563f, -3E-06f, 1E-06f} },
+	{ "j_index_le_2",           glm::vec3{2.870304f, 3E-06f, -2E-06f} },
+	{ "j_index_le_3",           glm::vec3{2.999999f, 4E-06f, 1E-06f} },
+	{ "j_mid_le_0",             glm::vec3{10.71768f, 0.362385f, -0.38647f} },
+	{ "j_mid_le_1",             glm::vec3{4.842623f, -1E-06f, -1E-06f} },
+	{ "j_mid_le_2",             glm::vec3{2.957112f, -1E-06f, -1E-06f} },
+	{ "j_mid_le_3",             glm::vec3{3.000005f, 4E-06f, 0.f} },
+	{ "j_ring_le_0",            glm::vec3{9.843364f, -1.747671f, -0.401116f} },
+	{ "j_ring_le_1",            glm::vec3{4.842618f, 4E-06f, -3E-06f} },
+	{ "j_ring_le_2",            glm::vec3{2.755294f, -2E-06f, 5E-06f} },
+	{ "j_ring_le_3",            glm::vec3{2.999998f, -2E-06f, -4E-06f} },
+	{ "j_pinky_le_0",           glm::vec3{8.613766f, -3.707476f, 0.16818f} },
+	{ "j_pinky_le_1",           glm::vec3{3.942609f, 1E-06f, 1E-06f} },
+	{ "j_pinky_le_2",           glm::vec3{1.794117f, 3E-06f, -3E-06f} },
+	{ "j_pinky_le_3",           glm::vec3{2.83939f, -1E-06f, 4E-06f} },
+	{ "j_wristtwist_le",        glm::vec3{21.60379f, 1.2E-05f, -3E-06f} },
+	{ "j_shoulder_ri",          glm::vec3{2.859542f, -20.16072f, -4.597286f} },
+	{ "j_elbow_ri",             glm::vec3{-30.71852f, 4E-06f, -2.4E-05f} },
+	{ "j_wrist_ri",             glm::vec3{-29.39067f, 4.4E-05f, 2.2E-05f} },
+	{ "j_thumb_ri_0",           glm::vec3{-2.786155f, -2.245166f, -0.851634f} },
+	{ "j_thumb_ri_1",           glm::vec3{-4.806832f, -6.6E-05f, 0.000141f} },
+	{ "j_thumb_ri_2",           glm::vec3{-2.433458f, -3.8E-05f, -5.3E-05f} },
+	{ "j_thumb_ri_3",           glm::vec3{-3.000123f, 0.00016f, 2.5E-05f} },
+	{ "j_flesh_ri",             glm::vec3{-4.822577f, -1.176315f, 0.110318f} },
+	{ "j_index_ri_0",           glm::vec3{-10.53432f, -2.786281f, -7E-06f} },
+	{ "j_index_ri_1",           glm::vec3{-4.562927f, -5.8E-05f, 5.4E-05f} },
+	{ "j_index_ri_2",           glm::vec3{-2.870313f, -6.5E-05f, 0.0001f} },
+	{ "j_index_ri_3",           glm::vec3{-2.999938f, 0.000165f, -6.5E-05f} },
+	{ "j_mid_ri_0",             glm::vec3{-10.71752f, -0.362501f, 0.386463f} },
+	{ "j_mid_ri_1",             glm::vec3{-4.842728f, 0.000151f, 2.8E-05f} },
+	{ "j_mid_ri_2",             glm::vec3{-2.957152f, -8.7E-05f, -2.2E-05f} },
+	{ "j_mid_ri_3",             glm::vec3{-3.00006f, -6.8E-05f, -1.9E-05f} },
+	{ "j_ring_ri_0",            glm::vec3{-9.843175f, 1.747613f, 0.401109f} },
+	{ "j_ring_ri_1",            glm::vec3{-4.842774f, 0.000176f, -6.3E-05f} },
+	{ "j_ring_ri_2",            glm::vec3{-2.755269f, -1.1E-05f, 0.000149f} },
+	{ "j_ring_ri_3",            glm::vec3{-3.000048f, -4.1E-05f, -4.9E-05f} },
+	{ "j_pinky_ri_0",           glm::vec3{-8.613756f, 3.707438f, -0.168202f} },
+	{ "j_pinky_ri_1",           glm::vec3{-3.942537f, -0.000117f, -6.5E-05f} },
+	{ "j_pinky_ri_2",           glm::vec3{-1.794038f, 0.000134f, 0.000215f} },
+	{ "j_pinky_ri_3",           glm::vec3{-2.839375f, 5.6E-05f, -0.000115f} },
+	{ "j_wristtwist_ri",        glm::vec3{-21.60388f, 9.7E-05f, 8E-06f} },
+	{ "tag_weapon",             glm::vec3{38.5059f, 0.f, -17.15191f} },
+	{ "tag_cambone",            glm::vec3{0.f, 0.f, 0.f} },
+	{ "tag_camera",             glm::vec3{0.f, 0.f, 0.f} },
+	{NULL, glm::vec3{0,0,0}}
+};
