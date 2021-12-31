@@ -195,7 +195,7 @@ bool XAnim::export_file(const std::string& filename)
 	if (!fp)
 		return false;
 
-	fprintf(fp, "// This was file generated with https://github.com/riicchhaarrd/xmodelexporter\n");
+	fprintf(fp, "// This was file generated with https://github.com/riicchhaarrd/xmodelconverter\n");
 	fprintf(fp, "ANIMATION\n");
 	fprintf(fp, "VERSION 3\n");
 	fprintf(fp, "\n");

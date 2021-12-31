@@ -111,7 +111,7 @@ bool XModel::export_file(const std::string& filename)
 	fopen_s(&fp, fullfilename.c_str(), "w");
 	if (!fp)
 		return false;
-	fprintf(fp, "// This was file generated with https://github.com/riicchhaarrd/xmodelexporter\n");
+	fprintf(fp, "// This was file generated with https://github.com/riicchhaarrd/xmodelconverter\n");
 	fprintf(fp, "MODEL\n");
 	fprintf(fp, "VERSION 6\n");
 	fprintf(fp, "\n");
