@@ -117,20 +117,23 @@ bool read_animation(XModel &xm, XAnim& xa, const std::string& basepath, const st
 		return false;
 	}
 #ifdef _WIN32
-	//for windows, just prompt for the model filepath
-
-	MessageBoxA(NULL, "Please select the xmodel for this xanim.", "Exporter", MB_OK | MB_ICONINFORMATION);
-
-	std::string selected_path;
-	if (!get_selected_filepath(selected_path))
+	if (!valid_xmodel)
 	{
-		return false;
-	}
-	//TODO: FIXME assuming model & animation have shared basepath
-	if (!read_model(xm, basepath, selected_path, valid_xmodel))
-	{
-		MessageBoxA(NULL, "Failed to load xmodel.", "Exporter", MB_OK | MB_ICONERROR);
-		return false;
+		//for windows, just prompt for the model filepath
+
+		MessageBoxA(NULL, "Please select the xmodel for this xanim.", "Exporter", MB_OK | MB_ICONINFORMATION);
+
+		std::string selected_path;
+		if (!get_selected_filepath(selected_path))
+		{
+			return false;
+		}
+		//TODO: FIXME assuming model & animation have shared basepath
+		if (!read_model(xm, basepath, selected_path, valid_xmodel))
+		{
+			MessageBoxA(NULL, "Failed to load xmodel.", "Exporter", MB_OK | MB_ICONERROR);
+			return false;
+		}
 	}
 #endif
 	
@@ -150,6 +153,8 @@ bool read_animation(XModel &xm, XAnim& xa, const std::string& basepath, const st
 
 int main(int argc, char** argv)
 {
+	bool valid_xmodel = false;
+	XModel ref_xm;
 	for (int i = 1; i < argc; ++i)
 	{
 		std::string path = argv[i];
@@ -165,13 +170,11 @@ int main(int argc, char** argv)
 		//printf("basepath = %s\n", basepath.c_str());
 		//printf("filepath = %s\n", filepath.c_str());
 		//getchar();
-		bool valid_xmodel = false;
-		XModel xm;
 		XAnim xa;
 
 		if (is_anim)
 		{
-			if (!read_animation(xm, xa, basepath, path, valid_xmodel))
+			if (!read_animation(ref_xm, xa, basepath, path, valid_xmodel))
 				break;
 			std::string exportpath = basepath;
 			exportpath += path_seperator;
@@ -186,6 +189,7 @@ int main(int argc, char** argv)
 			printf("Exported animation '%s'\n", filepath.c_str());
 		} else
 		{
+			XModel xm;
 			if (!read_model(xm, basepath, path, valid_xmodel))
 				break;
 			for (auto& lod : xm.lodstrings)
