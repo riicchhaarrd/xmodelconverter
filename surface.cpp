@@ -1,15 +1,13 @@
 #include "types.h"
 #include "util.h"
 
-bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, const std::string& path)
+bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd)
 {
-	auto v = util::read_file_to_memory(path.c_str());
-	if (v.empty())
-		return false;
-
-	BinaryReader rd(v);
+	this->clear();
 	u16 version = rd.read<u16>();
-	printf("xmodelsurface version %d\n", version);
+	if (version != 0x14)
+		return rd.set_error_message("expected xmodelsurface version 0x14, got %x\n", version);
+	//printf("xmodelsurface version %d\n", version);
 
 	//used for checking against xmodel numsurfs for file version conflict (e.g iwd/non-iwd)
 	u16 numsurfs = rd.read<u16>();

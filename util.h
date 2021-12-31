@@ -7,6 +7,14 @@
 #include <Windows.h>
 #endif
 
+#ifndef _WIN32
+static int fopen_s(FILE** fp, const char* filename, const char* mode)
+{
+	*fp = fopen(filename, mode);
+	return 0;
+}
+#endif
+
 namespace util
 {
 	static std::vector<char> read_file_to_memory(const std::string& _path)
@@ -36,12 +44,16 @@ namespace util
 		return Transform(rot, trans);
 	}
 
-	static BOOL directory_exists(const std::string& szPath)
+	static bool directory_exists(const std::string& szPath)
 	{
+#ifdef _WIN32
 		DWORD dwAttrib = GetFileAttributesA(szPath.c_str());
 
 		return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
 			(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+#else
+		return false;
+#endif
 	}
 
 	static vec3 get_translation_component_from_matrix(const mat4& mat)

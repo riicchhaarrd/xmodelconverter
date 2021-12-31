@@ -1,67 +1,224 @@
 #include "util.h"
+#ifdef _WIN32
+#include <Commdlg.h>
+#endif
 
-//e.g export_xmodel_and_animation("F:/SteamLibrary/steamapps/common/Call of Duty 2/main/", "xmodel/viewmodel_hands_cloth", "xanim/viewmodel_kar98_melee")
-//only exports the first lod, the highest quality one, change lodstrings index if you want to have a lower quality lod
-void export_xmodel_and_animation(const std::string& basepath, const std::string& xmodelfile, const std::string& xanimfile)
+bool BinaryReader::open_path(const std::string& path)
 {
-	XModel xm;
-	xm.read_xmodel_file(basepath, xmodelfile);
+	auto v = util::read_file_to_memory(path);
+	if (v.empty())
+		return false;
+	m_buf = v;
+	return true;
+}
 
-	if (xm.lodstrings.size() > 0)
+#ifdef _WIN32
+bool get_selected_filepath(std::string &path)
+{
+	OPENFILENAMEA ofn;
+	char szFile[MAX_PATH + 1];
+	// open a file name
+	ZeroMemory(&ofn, sizeof(ofn));
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = NULL;
+	ofn.lpstrFile = szFile;
+	ofn.lpstrFile[0] = '\0';
+	ofn.nMaxFile = sizeof(szFile);
+	ofn.lpstrFilter = "XModel\0*.*\0";
+	ofn.nFilterIndex = 1;
+	ofn.lpstrFileTitle = NULL;
+	ofn.nMaxFileTitle = 0;
+	ofn.lpstrInitialDir = NULL;
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+	if (!GetOpenFileNameA(&ofn))
+		return false;
+	path = ofn.lpstrFile;
+	return true;
+}
+#endif
+
+bool deduce_file_info_from_path(const std::string& path, std::string& basepath, std::string& filepath, int& path_seperator, bool &is_anim)
+{
+	is_anim = false;
+#ifndef _WIN32
+	path_seperator = '/';
+#else
+	path_seperator = path.find('/') == std::string::npos ? '\\' : '/';
+#endif
+
+	std::string query = "xmodel";
+	query += path_seperator;
+
+	int fnd = path.find(query);
+	if (fnd != std::string::npos)
 	{
-		xm.parts.read_xmodelparts_file(xm, basepath + "xmodelparts/" + xm.lodstrings[0]);
-		xm.surface.read_xmodelsurface_file(xm.parts, basepath + "xmodelsurfs/" + xm.lodstrings[0]);
-		xm.export_file("test");
+		basepath = path.substr(0, fnd);
+		filepath = path.substr(fnd);
+		filepath = filepath.substr(filepath.find(path_seperator) + 1);
+		return true;
 	}
-	XAnim xa;
+
+	query = "xanim";
+	query += path_seperator;
+
+	fnd = path.find(query);
+	if (fnd != std::string::npos)
+	{
+		is_anim = true;
+		basepath = path.substr(0, fnd);
+		filepath = path.substr(fnd);
+		filepath = filepath.substr(filepath.find(path_seperator) + 1);
+		return true;
+	}
+	return false;
+}
+
+bool read_model(XModel &xm, const std::string& basepath, const std::string& path, bool &valid_xmodel)
+{
+	BinaryReader rd;
+	if (!rd.open_path(path))
+	{
+		printf("Failed to read '%s'\n", path.c_str());
+		return false;
+	}
+
+	if (!xm.read_xmodel_file(rd))
+	{
+		printf("Failed to read xmodel file '%s', error: %s\n", path.c_str(), rd.get_error_message().c_str());
+		return false;
+	}
+	if (xm.lodstrings.empty())
+	{
+		printf("No lods available for exporting for file '%s'\n", path.c_str());
+		return false;
+	}
+	BinaryReader rd_parts;
+	if (!rd_parts.open_path(basepath + "xmodelparts/" + xm.lodstrings[0]))
+	{
+		printf("Failed to read xmodelparts '%s'\n", xm.lodstrings[0].c_str());
+		return false;
+	}
+	if (!xm.parts.read_xmodelparts_file(xm, rd_parts))
+	{
+		printf("Failed to parse '%s', error: %s\n", xm.lodstrings[0].c_str(), rd_parts.get_error_message().c_str());
+		return false;
+	}
+	valid_xmodel = true;
+	return true;
+}
+
+bool read_animation(XModel &xm, XAnim& xa, const std::string& basepath, const std::string& path, bool &valid_xmodel)
+{
+	BinaryReader rd;
+	if (!rd.open_path(path))
+	{
+		printf("Failed to read '%s'\n", path.c_str());
+		return false;
+	}
+#ifdef _WIN32
+	//for windows, just prompt for the model filepath
+
+	MessageBoxA(NULL, "Please select the xmodel for this xanim.", "Exporter", MB_OK | MB_ICONINFORMATION);
+
+	std::string selected_path;
+	if (!get_selected_filepath(selected_path))
+	{
+		return false;
+	}
+	//TODO: FIXME assuming model & animation have shared basepath
+	if (!read_model(xm, basepath, selected_path, valid_xmodel))
+	{
+		MessageBoxA(NULL, "Failed to load xmodel.", "Exporter", MB_OK | MB_ICONERROR);
+		return false;
+	}
+#endif
+	
+	if (!valid_xmodel)
+	{
+		printf("There's no valid xmodel loaded at the moment, please pass a model as reference as argument before the animation.\n");
+		return false;
+	}
 	xa.m_reference = &xm;
-	if (!xa.read_xanim_file(basepath, xanimfile))
-		printf("failed to read xanim\n");
-	else
+	if (!xa.read_xanim_file(rd))
 	{
-		printf("writing animation\n");
-		xa.export_file("test");
+		printf("Failed to read xanim file '%s', error: %s\n", path.c_str(), rd.get_error_message().c_str());
+		return false;
 	}
+	return true;
 }
 
 int main(int argc, char** argv)
 {
-	if (argc > 1)
+	for (int i = 1; i < argc; ++i)
 	{
-		//drag and drop xmodel file onto exe
-		//make sure there's a decompiled folder in your root directory, which is usually main
-		for (int k = 1; k < argc; ++k)
+		std::string path = argv[i];
+
+		std::string basepath, filepath;
+		int path_seperator;
+		bool is_anim;
+		if (!deduce_file_info_from_path(path, basepath, filepath, path_seperator, is_anim))
 		{
-			std::string path = argv[k];
-			auto fnd = path.find_first_of("xmodel");
-			if (fnd != std::string::npos)
+			printf("Failed to get file information for '%s'\n", path.c_str());
+			break;
+		}
+		//printf("basepath = %s\n", basepath.c_str());
+		//printf("filepath = %s\n", filepath.c_str());
+		//getchar();
+		bool valid_xmodel = false;
+		XModel xm;
+		XAnim xa;
+
+		if (is_anim)
+		{
+			if (!read_animation(xm, xa, basepath, path, valid_xmodel))
+				break;
+			std::string exportpath = basepath;
+			exportpath += path_seperator;
+			exportpath += "exported";
+			exportpath += path_seperator;
+			exportpath += filepath;
+			if (!xa.export_file(exportpath))
 			{
-				auto bp = path.substr(0, fnd + 2);
-				//we could use CreateDirectory, but maybe we don't have permission to write there so eh
-				if (!util::directory_exists(bp + "\\decompiled"))
+				printf("Failed exporting animation '%s'\n", filepath.c_str());
+				break;
+			}
+			printf("Exported animation '%s'\n", filepath.c_str());
+		} else
+		{
+			if (!read_model(xm, basepath, path, valid_xmodel))
+				break;
+			for (auto& lod : xm.lodstrings)
+			{
+				BinaryReader rd_surfs;
+				if (!rd_surfs.open_path(basepath + "xmodelsurfs/" + lod))
 				{
-					printf("Create a folder 'decompiled' in '%s'\n", bp.c_str());
-					getchar();
-					exit(0);
+					printf("Failed to read xmodelsurfs '%s'\n", lod.c_str());
+					break;
 				}
-				auto filepath = path.substr(fnd + 2);
-				printf("bp=%s,filepath=%s\n", bp.c_str(), filepath.c_str());
-				XModel xm;
-				if (xm.read_xmodel_file(bp, filepath))
+				if (!xm.surface.read_xmodelsurface_file(xm.parts, rd_surfs))
 				{
-					if (xm.lodstrings.size() > 0)
-					{
-						for (int i = 0; i < xm.lodstrings.size(); ++i)
-						{
-							xm.parts.read_xmodelparts_file(xm, bp + "xmodelparts/" + xm.lodstrings[i]);
-							xm.surface.read_xmodelsurface_file(xm.parts, bp + "xmodelsurfs/" + xm.lodstrings[i]);
-							xm.export_file(bp + "\\decompiled\\" + xm.lodstrings[i]);
-						}
-					}
+					printf("Failed to parse '%s', error: %s\n", lod.c_str(), rd_surfs.get_error_message().c_str());
+					break;
 				}
+
+				std::string exportpath = basepath;
+				exportpath += path_seperator;
+				exportpath += "exported";
+				exportpath += path_seperator;
+				exportpath += lod;
+				if (!xm.export_file(exportpath))
+				{
+					printf("Failed exporting model '%s'\n", lod.c_str());
+					break;
+				}
+				printf("Exported model '%s'\n", lod.c_str());
 			}
 		}
-		getchar();
 	}
+#ifdef _WIN32
+	printf("Press any key to exit.\n");
+	getchar();
+#endif
 	return 0;
 }

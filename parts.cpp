@@ -2,14 +2,11 @@
 #include "util.h"
 #include "bone_offset_table.h"
 
-bool XModelParts::read_xmodelparts_file(XModel &xm, const std::string& path)
+bool XModelParts::read_xmodelparts_file(XModel &xm, BinaryReader &rd)
 {
-	auto v = util::read_file_to_memory(path.c_str());
-	if (v.empty())
-		return false;
-
-	BinaryReader rd(v);
 	u16 version = rd.read<u16>();
+	if (version != 0x14)
+		return rd.set_error_message("expected xmodelparts version 0x14, got %x\n", version);
 
 	this->numbonesrelative = rd.read<u16>();
 	this->numbonesabsolute = rd.read<u16>();

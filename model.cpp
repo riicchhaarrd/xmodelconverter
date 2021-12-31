@@ -1,16 +1,11 @@
 #include "types.h"
 #include "util.h"
 
-bool XModel::read_xmodel_file(const std::string& basepath, const std::string& filename)
+bool XModel::read_xmodel_file(BinaryReader& rd)
 {
-	this->path = basepath + filename;
-	auto v = util::read_file_to_memory(this->path);
-	if (v.empty())
-	{
-		return false;
-	}
-	BinaryReader rd(v);
 	u16 version = rd.read<u16>();
+	if (version != 0x14)
+		return rd.set_error_message("expected xmodel version 0x14, got %x\n", version);
 	u8 flags = rd.read<u8>();
 	vec3 mins = rd.read<vec3>();
 	vec3 maxs = rd.read<vec3>();
@@ -207,4 +202,5 @@ bool XModel::export_file(const std::string& filename)
 	fprintf(fp, "PHONG -1.000000\n");
 	//if(fp != stdout)
 	fclose(fp);
+	return true;
 }

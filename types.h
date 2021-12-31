@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstring>
 #include <fstream>
+//#include <format> //since c++20, for now let's just stick to c formatting
 #include <string>
 #include <vector>
 #include <map>
@@ -39,6 +41,89 @@ typedef enum
 	LOD_LOWEST = 3,
 	LOD_NONE = -1
 } collision_lod_t;
+
+struct BinaryReader
+{
+	std::string m_error_message;
+
+	using buffer_t = std::vector<char>;
+
+	buffer_t m_buf;
+	size_t m_pos;
+	BinaryReader()
+		:
+		m_pos(0)
+	{
+	}
+
+	bool open_path(const std::string& path);
+
+	template <typename ... Ts>
+	bool set_error_message(const char* fmt, Ts ... ts)
+	{
+		char buf[1024];
+		snprintf(buf, sizeof(buf), fmt, ts...);
+		m_error_message = buf;
+		return false;
+	}
+
+	const std::string& get_error_message() const
+	{
+		return m_error_message;
+	}
+
+	bool read_null_terminated_string(std::string& s)
+	{
+		s.clear();
+		u8 c;
+		while ((c = read<u8>()))
+			s.push_back(c);
+		return !s.empty();
+	}
+
+	template<typename T>
+	std::vector<T> read_typed_buffer_to_vector(size_t N)
+	{
+		std::vector<T> v;
+		for (size_t i = 0; i < N; ++i)
+			v.push_back(read<T>());
+		return v;
+	}
+
+	template<typename T>
+	T read()
+	{
+		T _value = *(T*)(m_buf.data() + m_pos);
+		m_pos += sizeof(T);
+		return _value;
+	}
+
+	glm::quat read_quat(bool flipquat = false, bool simplequat = false)
+	{
+		float x = 0.f;
+		float y = 0.f;
+		float z = 0.f;
+		float w = 0.f;
+
+		if (simplequat)
+		{
+			z = ((float)read<i16>()) / (float)SHRT_MAX;
+		}
+		else
+		{
+			x = ((float)read<i16>()) / (float)SHRT_MAX;
+			y = ((float)read<i16>()) / (float)SHRT_MAX;
+			z = ((float)read<i16>()) / (float)SHRT_MAX;
+		}
+
+		w = 1.f - x * x - y * y - z * z;
+		if (w > 0.f)
+			w = sqrt(w);
+		//if (flipquat)
+			//return glm::quat(w, x, -z, y);
+		return glm::quat(w, x, y, z);
+	}
+};
 
 struct Transform
 {
@@ -110,14 +195,19 @@ struct XModelParts
 		}
 		return -1;
 	}
-	bool read_xmodelparts_file(struct XModel &xm, const std::string& filename);
+	bool read_xmodelparts_file(struct XModel &xm, BinaryReader&);
 };
 
 struct XModelSurface
 {
 	std::vector<unsigned int> indices;
 	std::vector<Vertex> vertices;
-	bool read_xmodelsurface_file(XModelParts& parts, const std::string& filename);
+	void clear()
+	{
+		indices.clear();
+		vertices.clear();
+	}
+	bool read_xmodelsurface_file(XModelParts& parts, BinaryReader&);
 };
 
 struct XModel
@@ -128,7 +218,7 @@ struct XModel
 	XModelSurface surface;
 	std::vector<std::string> lodstrings;
 
-	bool read_xmodel_file(const std::string& basepath, const std::string& filename);
+	bool read_xmodel_file(BinaryReader&);
 	bool export_file(const std::string& filename);
 };
 
@@ -137,71 +227,6 @@ struct XAnimFrame
 	//have to seperate these incase we do have a good rotation but no good translation or other way around
 	std::map<std::string, glm::quat> quats;
 	std::map<std::string, vec3> trans;
-};
-
-struct BinaryReader
-{
-	using buffer_t = std::vector<char>;
-	buffer_t& m_buf;
-	size_t m_pos;
-	BinaryReader(buffer_t& _buf)
-		:
-		m_buf(_buf),
-		m_pos(0)
-	{
-	}
-
-	bool read_null_terminated_string(std::string& s)
-	{
-		s.clear();
-		u8 c;
-		while ((c = read<u8>()))
-			s.push_back(c);
-		return !s.empty();
-	}
-
-	template<typename T>
-	std::vector<T> read_typed_buffer_to_vector(size_t N)
-	{
-		std::vector<T> v;
-		for (size_t i = 0; i < N; ++i)
-			v.push_back(read<T>());
-		return v;
-	}
-
-	template<typename T>
-	T read()
-	{
-		T _value = *(T*)(m_buf.data() + m_pos);
-		m_pos += sizeof(T);
-		return _value;
-	}
-
-	glm::quat read_quat(bool flipquat = false, bool simplequat = false)
-	{
-		float x = 0.f;
-		float y = 0.f;
-		float z = 0.f;
-		float w = 0.f;
-
-		if (simplequat)
-		{
-			z = ((float)read<i16>()) / (float)SHRT_MAX;
-		}
-		else
-		{
-			x = ((float)read<i16>()) / (float)SHRT_MAX;
-			y = ((float)read<i16>()) / (float)SHRT_MAX;
-			z = ((float)read<i16>()) / (float)SHRT_MAX;
-		}
-
-		w = 1.f - x * x - y * y - z * z;
-		if (w > 0.f)
-			w = sqrt(w);
-		//if (flipquat)
-			//return glm::quat(w, x, -z, y);
-		return glm::quat(w, x, y, z);
-	}
 };
 
 struct XAnim
@@ -220,6 +245,6 @@ struct XAnim
 
 	void read_translations(const std::string& tag);
 	void read_rotations(const std::string& tag, bool flipquat, bool simplequat);
-	bool read_xanim_file(const std::string& basepath, const std::string& filename);
-	void export_file(const std::string& filename);
+	bool read_xanim_file(BinaryReader&);
+	bool export_file(const std::string& filename);
 };

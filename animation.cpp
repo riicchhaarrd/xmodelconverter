@@ -77,15 +77,12 @@ void XAnim::read_rotations(const std::string& tag, bool flipquat, bool simplequa
 	}
 }
 
-bool XAnim::read_xanim_file(const std::string& basepath, const std::string& filename)
+bool XAnim::read_xanim_file(BinaryReader &rd)
 {
-	auto v = util::read_file_to_memory(basepath + filename);
-	if (v.empty())
-		return false;
-
-	BinaryReader rd(v);
 	m_reader = &rd;
 	m_version = rd.read<u16>();
+	if (m_version != 0xe)
+		return rd.set_error_message("expected xanim version 0xe, got %x\n", m_version);
 	m_numframes = rd.read<u16>();
 	m_numparts = rd.read<u16>();
 	m_flags = rd.read<u8>();
@@ -162,7 +159,7 @@ bool XAnim::read_xanim_file(const std::string& basepath, const std::string& file
 			if (curframe->trans.find(refbone.name) != curframe->trans.end())
 			{
 				//xb.trans = (xb.trans + curframe->trans[refbone.name]) / 2.f;
-				if (refbone.name == "tag_origin")
+				if (refbone.name == "tag_origin") //ignore any translations for tag_origin, so the animation moves on the spot
 					;
 				else
 					xb.transform.translation = curframe->trans[refbone.name];
@@ -182,21 +179,21 @@ bool XAnim::read_xanim_file(const std::string& basepath, const std::string& file
 		for (int i = 0; i < notifycount; ++i)
 		{
 			notifystring
-				u16 notifytimevalue
-				//actual time in float = notifytimevalue / numframes
+			u16 notifytimevalue
+			//actual time in float = notifytimevalue / numframes
 		}
 #endif
 	return true;
 }
 
-void XAnim::export_file(const std::string& filename)
+bool XAnim::export_file(const std::string& filename)
 {
 	FILE* fp = NULL;
 	std::string fullfilename = filename + ".xanim_export";
 	fopen_s(&fp, fullfilename.c_str(), "w");
 
 	if (!fp)
-		return;
+		return false;
 
 	fprintf(fp, "// This was file generated with https://github.com/riicchhaarrd/xmodelexporter\n");
 	fprintf(fp, "ANIMATION\n");
@@ -244,4 +241,5 @@ void XAnim::export_file(const std::string& filename)
 		fprintf(fp, "\n");
 	}
 	fclose(fp);
+	return true;
 }
