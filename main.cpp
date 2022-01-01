@@ -152,8 +152,56 @@ bool read_animation(XModel &xm, XAnim& xa, const std::string& basepath, const st
 	return true;
 }
 
+#include "iwi.h"
+
+bool convert_iwi_to_dds(const std::string& path, const std::string& export_path)
+{
+	BinaryReader rd;
+	if (rd.open_path(path))
+	{
+		IWI iwi;
+		if (iwi.read_from_memory(rd))
+		{
+			std::vector<u8> dds;
+			if (iwi.build_dds(dds))
+			{
+				FILE* fp = 0;
+				fopen_s(&fp, export_path.c_str(), "wb");
+				if (fp)
+				{
+					fwrite(dds.data(), 1, dds.size(), fp);
+					fclose(fp);
+					return true;
+				}
+				else
+					printf("failed open dds file\n");
+			}
+			else
+				printf("failed build dds\n");
+		}
+		else
+			printf("failed read from memory %s\n", rd.get_error_message().c_str());
+	}
+	else
+		printf("failed to open path '%s'\n", path.c_str());
+	return false;
+}
+
+bool get_color_map_from_material_file(const std::string& path, std::string& color_map)
+{
+	BinaryReader rd;
+
+	if (!rd.open_path(path))
+		return false;
+	u32 material_offset = rd.read<u32>();
+	u32 color_map_offset = rd.read<u32>();
+	color_map = (char*)(rd.buffer() + color_map_offset);
+	return true;
+}
+
 int main(int argc, char** argv)
 {
+	std::unordered_map<std::string, bool> processed; //cache what we exported, so we don't do it again
 	bool valid_xmodel = false;
 	XModel ref_xm;
 	for (int i = 1; i < argc; ++i)
@@ -193,6 +241,30 @@ int main(int argc, char** argv)
 			XModel xm;
 			if (!read_model(xm, basepath, path, valid_xmodel))
 				break;
+			//convert all model materials
+			for (auto& mat : xm.materials)
+			{
+				std::string materialpath = basepath + "materials";
+				materialpath += path_seperator;
+				materialpath += mat;
+				std::string color_map;
+				get_color_map_from_material_file(materialpath, color_map);
+
+				printf("material: %s, color: %s\n", materialpath.c_str(), color_map.c_str());
+
+				std::string color_map_path = basepath + "images";
+				color_map_path += path_seperator;
+				color_map_path += color_map + ".iwi";
+				std::string color_map_export_path = basepath + "exported";
+				color_map_export_path += path_seperator;
+				color_map_export_path += color_map + ".dds";
+
+				if (!processed[color_map] && convert_iwi_to_dds(color_map_path, color_map_export_path))
+				{
+					printf("converted %s\n", color_map.c_str());
+					processed[color_map] = true;
+				}
+			}
 			for (auto& lod : xm.lodstrings)
 			{
 				BinaryReader rd_surfs;

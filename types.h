@@ -90,6 +90,16 @@ struct BinaryReader
 		return v;
 	}
 
+	void skip(size_t n)
+	{
+		m_pos += n;
+	}
+
+	u8* buffer() const
+	{
+		return (u8*)m_buf.data();
+	}
+
 	template<typename T>
 	T read()
 	{
