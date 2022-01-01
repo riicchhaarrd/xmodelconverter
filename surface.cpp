@@ -74,6 +74,7 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 			vertices.push_back(vtx);
 		}
 		int idx = 0;
+		Mesh mesh;
 		for (int i = 0; i < tricount; ++i)
 		{
 			u16 face[3];
@@ -84,10 +85,10 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 			for (int j = 0; j < 3; ++j)
 			{
 				this->vertices.push_back(vertices.at(face[j]));
-				this->indices.push_back(idx++);
+				mesh.indices.push_back(idx++);
 			}
 		}
-		//xms.meshes.push_back(m);
+		this->meshes.push_back(mesh);
 	}
 
 	return true;

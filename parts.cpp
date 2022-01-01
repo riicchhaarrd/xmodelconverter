@@ -28,7 +28,6 @@ bool XModelParts::read_xmodelparts_file(XModel &xm, BinaryReader &rd)
 		this->bones[i + 1].parent = parent;
 	}
 
-	bool viewhands = xm.path.find("viewmodel_hands") != std::string::npos;
 	for (int j = 0; j < this->numbonestotal; ++j)
 	{
 		auto& bone = this->bones[j];
@@ -40,7 +39,7 @@ bool XModelParts::read_xmodelparts_file(XModel &xm, BinaryReader &rd)
 			break;
 		this->bones[j].name = bonename;
 		this->bonemap[bonename] = j;
-		if (viewhands && j > 0)
+		if (xm.viewhands && j > 0)
 		{
 			for (int z = 0; viewmodel_offsets_table[z].bonename; ++z)
 			{

@@ -3,6 +3,8 @@
 
 bool XModel::read_xmodel_file(BinaryReader& rd)
 {
+	viewhands = rd.get_path().find("viewmodel_hands") != std::string::npos;
+
 	u16 version = rd.read<u16>();
 	if (version != 0x14)
 		return rd.set_error_message("expected xmodel version 0x14, got %x\n", version);
@@ -22,11 +24,12 @@ bool XModel::read_xmodel_file(BinaryReader& rd)
 		while ((c = rd.read<u8>()))
 			lodfilename.push_back(c);
 		if (lodfilename.empty())
-			break;
+			continue;
 		printf("lod %d: %s (%f)\n", i, lodfilename.c_str(), dist);
 		++numlods;
 		this->lodstrings.push_back(lodfilename);
 	}
+
 	collision_lod_t collisionlod = (collision_lod_t)rd.read<i32>();
 	printf("collisionlod=%d\n", collisionlod);
 	i32 numcollsurfs = rd.read<i32>();
@@ -55,22 +58,18 @@ bool XModel::read_xmodel_file(BinaryReader& rd)
 			int surfaceflags = rd.read<i32>();
 		}
 	}
-
-	for (int i = 0; i < numlods; ++i)
+	u16 nummaterials = rd.read<u16>();
+	printf("nummaterials=%d\n", nummaterials);
+	for (int i = 0; i < nummaterials; ++i)
 	{
-		i16 nummaterials = rd.read<i16>();
-		printf("lod %d\n", i);
-		printf("nummaterials=%d\n", nummaterials);
-		for (int j = 0; j < nummaterials; ++j)
-		{
-			std::string material;
-			u8 c;
-			while ((c = rd.read<u8>()))
-				material.push_back(c);
-			if (material.empty())
-				break;
-			printf("\tmaterial %d: %s\n", j, material.c_str());
-		}
+		std::string material;
+		u8 c;
+		while ((c = rd.read<u8>()))
+			material.push_back(c);
+		if (material.empty())
+			break;
+		this->materials.push_back(material);
+		printf("\tmaterial %s\n", material.c_str());
 	}
 
 	//don't care about the mins maxs
@@ -166,40 +165,55 @@ bool XModel::export_file(const std::string& filename)
 		}
 		fprintf(fp, "\n");
 	}
-	fprintf(fp, "NUMFACES %d\n", surface.indices.size() / 3);
-	for (int i = 0; i < surface.indices.size(); i += 3)
+
+	fprintf(fp, "NUMFACES %d\n", surface.numfaces());
+	int meshindex = 0;
+	for (auto& m : surface.meshes)
 	{
-		fprintf(fp, "TRI 0 0 0 0\n");
-		auto& v1 = surface.vertices[surface.indices[i]];
-		auto& v2 = surface.vertices[surface.indices[i + 1]];
-		auto& v3 = surface.vertices[surface.indices[i + 2]];
-		for (int k = 0; k < 3; ++k)
+		for (int i = 0; i < m.indices.size(); i += 3)
 		{
-			auto& kv = surface.vertices[surface.indices[i + k]];
-			fprintf(fp, "VERT %d\n", surface.indices[i + k]);
-			fprintf(fp, "NORMAL %f %f %f\n", kv.normal.x, kv.normal.y, kv.normal.z);
-			fprintf(fp, "COLOR 1.000000 1.000000 1.000000 1.000000\n");
-			fprintf(fp, "UV 1 %f %f\n", kv.uv.x, kv.uv.y);
+			fprintf(fp, "TRI %d %d 0 0\n", meshindex, meshindex);
+			auto& v1 = surface.vertices[m.indices[i]];
+			auto& v2 = surface.vertices[m.indices[i + 1]];
+			auto& v3 = surface.vertices[m.indices[i + 2]];
+			for (int k = 0; k < 3; ++k)
+			{
+				auto& kv = surface.vertices[m.indices[i + k]];
+				fprintf(fp, "VERT %d\n", m.indices[i + k]);
+				fprintf(fp, "NORMAL %f %f %f\n", kv.normal.x, kv.normal.y, kv.normal.z);
+				fprintf(fp, "COLOR 1.000000 1.000000 1.000000 1.000000\n");
+				fprintf(fp, "UV 1 %f %f\n", kv.uv.x, kv.uv.y);
+			}
+			fprintf(fp, "\n");
 		}
-		fprintf(fp, "\n");
+		++meshindex;
 	}
-	fprintf(fp, "NUMOBJECTS 1\n");
-	fprintf(fp, "OBJECT 0 \"test\"\n");
+	meshindex = 0;
+	fprintf(fp, "NUMOBJECTS %d\n", surface.meshes.size());
+	for (auto& m : surface.meshes)
+	{
+		fprintf(fp, "OBJECT %d \"mesh_%d\"\n", meshindex, meshindex);
+		++meshindex;
+	}
 	fprintf(fp, "\n");
-	fprintf(fp, "NUMMATERIALS 1\n");
-	fprintf(fp, "MATERIAL 0 \"aa_default\" \"Lambert\" \"test.jpg\"\n");
-	fprintf(fp, "COLOR 0.000000 0.000000 0.000000 1.000000\n");
-	fprintf(fp, "TRANSPARENCY 0.000000 0.000000 0.000000 1.000000\n");
-	fprintf(fp, "AMBIENTCOLOR 0.000000 0.000000 0.000000 1.000000\n");
-	fprintf(fp, "INCANDESCENCE 0.000000 0.000000 0.000000 1.000000\n");
-	fprintf(fp, "COEFFS 0.800000 0.000000\n");
-	fprintf(fp, "GLOW 0.000000 0\n");
-	fprintf(fp, "REFRACTIVE 6 1.000000\n");
-	fprintf(fp, "SPECULARCOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
-	fprintf(fp, "REFLECTIVECOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
-	fprintf(fp, "REFLECTIVE -1 -1.000000\n");
-	fprintf(fp, "BLINN -1.000000 -1.000000\n");
-	fprintf(fp, "PHONG -1.000000\n");
+	fprintf(fp, "NUMMATERIALS %d\n", this->materials.size());
+	int matindex = 0;
+	for (auto& mat : this->materials)
+	{
+		fprintf(fp, "MATERIAL %d \"%s\" \"Lambert\" \"test.jpg\"\n", matindex++, mat.c_str());
+		fprintf(fp, "COLOR 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "TRANSPARENCY 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "AMBIENTCOLOR 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "INCANDESCENCE 0.000000 0.000000 0.000000 1.000000\n");
+		fprintf(fp, "COEFFS 0.800000 0.000000\n");
+		fprintf(fp, "GLOW 0.000000 0\n");
+		fprintf(fp, "REFRACTIVE 6 1.000000\n");
+		fprintf(fp, "SPECULARCOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
+		fprintf(fp, "REFLECTIVECOLOR -1.000000 -1.000000 -1.000000 1.000000\n");
+		fprintf(fp, "REFLECTIVE -1 -1.000000\n");
+		fprintf(fp, "BLINN -1.000000 -1.000000\n");
+		fprintf(fp, "PHONG -1.000000\n");
+	}
 	//if(fp != stdout)
 	fclose(fp);
 	return true;

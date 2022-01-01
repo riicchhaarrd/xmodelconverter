@@ -9,6 +9,7 @@ bool BinaryReader::open_path(const std::string& path)
 	if (v.empty())
 		return false;
 	m_buf = v;
+	m_path = path;
 	return true;
 }
 

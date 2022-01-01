@@ -45,7 +45,7 @@ typedef enum
 struct BinaryReader
 {
 	std::string m_error_message;
-
+	std::string m_path;
 	using buffer_t = std::vector<char>;
 
 	buffer_t m_buf;
@@ -55,7 +55,7 @@ struct BinaryReader
 		m_pos(0)
 	{
 	}
-
+	const std::string& get_path() const { return m_path; }
 	bool open_path(const std::string& path);
 
 	template <typename ... Ts>
@@ -198,25 +198,39 @@ struct XModelParts
 	bool read_xmodelparts_file(struct XModel &xm, BinaryReader&);
 };
 
-struct XModelSurface
+struct Mesh
 {
 	std::vector<unsigned int> indices;
+};
+
+struct XModelSurface
+{
 	std::vector<Vertex> vertices;
+	std::vector<Mesh> meshes;
 	void clear()
 	{
-		indices.clear();
+		meshes.clear();
 		vertices.clear();
+	}
+
+	size_t numfaces()
+	{
+		size_t sum = 0;
+		for (auto& m : meshes)
+			sum += m.indices.size() / 3;
+		return sum;
 	}
 	bool read_xmodelsurface_file(XModelParts& parts, BinaryReader&);
 };
 
 struct XModel
 {
-	std::string path;
 	XModelParts parts;
 	//should probably be a array/vector for all the lods
 	XModelSurface surface;
 	std::vector<std::string> lodstrings;
+	std::vector<std::string> materials;
+	bool viewhands;
 
 	bool read_xmodel_file(BinaryReader&);
 	bool export_file(const std::string& filename);
