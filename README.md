@@ -43,6 +43,6 @@ g++ -w *.cpp -o xmodelconverter
 ```
 
 ## Blender
-To import the _export files into Blender, you need to install the blender-cod plugin.
+To import the _export files into Blender, you need to install a addon.
 
-https://github.com/CoDEmanX/blender-cod
+https://github.com/riicchhaarrd/io_scene_xmodel
