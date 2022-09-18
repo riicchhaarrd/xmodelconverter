@@ -11,10 +11,11 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 
 	//used for checking against xmodel numsurfs for file version conflict (e.g iwd/non-iwd)
 	u16 numsurfs = rd.read<u16>();
-	std::vector<Vertex> vertices;
 
+	int idx = 0;
 	for (int i = 0; i < numsurfs; ++i)
 	{
+		std::vector<Vertex> vertices;
 		u8 tilemode = rd.read<u8>();
 		u16 vertcount = rd.read<u16>();
 		u16 tricount = rd.read<u16>();
@@ -71,9 +72,9 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 			}
 			auto transform = util::get_world_transform(parts.bones, boneindex);
 			vtx.pos = glm::rotate(transform.rotation, offset) + transform.translation;
+			vtx.normal = glm::rotate(transform.rotation, vtx.normal);
 			vertices.push_back(vtx);
 		}
-		int idx = 0;
 		Mesh mesh;
 		for (int i = 0; i < tricount; ++i)
 		{
