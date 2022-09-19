@@ -23,9 +23,9 @@ bool XModelParts::read_xmodelparts_file(XModel &xm, BinaryReader &rd)
 		vec3 trans = rd.read<vec3>();
 		quat rot = rd.read_quat();
 
-		this->bones[i + 1].transform.rotation = rot;
-		this->bones[i + 1].transform.translation = trans;
-		this->bones[i + 1].parent = parent;
+		this->bones[i + numbonesabsolute].transform.rotation = rot;
+		this->bones[i + numbonesabsolute].transform.translation = trans;
+		this->bones[i + numbonesabsolute].parent = parent;
 	}
 
 	for (int j = 0; j < this->numbonestotal; ++j)
