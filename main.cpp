@@ -291,6 +291,7 @@ int main(int argc, char** argv)
 				}
 				printf("Exported model '%s'\n", lod.c_str());
 			}
+			ref_xm = xm;
 		}
 	}
 #ifdef _WIN32
