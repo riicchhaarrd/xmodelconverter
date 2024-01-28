@@ -170,19 +170,15 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 		}
 		m_refframes.push_back(refframe);
 	}
-
-	return true;
-
-#if 0
-	//at end of file
-	byte notifycount
-		for (int i = 0; i < notifycount; ++i)
-		{
-			notifystring
-			u16 notifytimevalue
-			//actual time in float = notifytimevalue / numframes
-		}
-#endif
+	u8 notify_count = rd.read<u8>();
+        for (int i = 0; i < notify_count; ++i)
+        {
+		//TODO: write this to xanim_export
+                std::string notify_string;
+                rd.read_null_terminated_string(notify_string);
+                u16 notify_time_value = rd.read<u16>();
+                printf("notify string: %s:%f, frame: %d\n", notify_string.c_str(), ((float)notify_time_value / ((float)m_numframes)), notify_time_value);
+        }
 	return true;
 }
 
