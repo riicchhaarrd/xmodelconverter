@@ -30,6 +30,7 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 			Vertex vtx;
 			vtx.numweights = 0;
 			vec3 n = rd.read<vec3>();
+			n *= -1.f;
 			u32 color = rd.read<u32>();
 			float u, v;
 			u = rd.read<float>();
